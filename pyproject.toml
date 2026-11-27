@@ -53,6 +53,13 @@ dev = [
     # Keep in sync with .pre-commit-config.yaml and .github/workflows/ci.yml.
     "ruff>=0.17,<0.18",
 ]
+# Documentation site (MkDocs Material + mkdocstrings). See `make docs-serve`.
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.6,<10",
+    "mkdocstrings[python]>=1.0,<2",
+    "mkdocs-click>=0.9,<0.10",
+]
 
 [project.urls]
 Homepage = "https://github.com/marlesson/mars-rec"

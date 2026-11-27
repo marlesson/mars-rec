@@ -19,7 +19,8 @@ def summary(model, x, *args, **kwargs):
         model (Module): Model to summarize
         x (Tensor): Input tensor of the model with [N, C, H, W] shape
                     dtype and device have to match to the model
-        args, kwargs: Other argument used in `model.forward` function
+        *args: Other positional arguments used in `model.forward`.
+        **kwargs: Other keyword arguments used in `model.forward`.
     """
 
     def register_hook(module):

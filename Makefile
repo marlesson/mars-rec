@@ -32,7 +32,7 @@ BASE_IMAGE    ?= pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-dev install-locked lock lock-upgrade audit test test-v test-cov lint format clean \
+.PHONY: help install install-dev install-locked lock lock-upgrade audit test test-v test-cov lint format clean docs docs-serve \
         docker-build docker-run docker-run-data docker-test docker-push docker-pull \
         gcp-setup gcp-create-repo gcp-submit vertex-run \
         vertex-list-jobs vertex-download-model \
@@ -54,6 +54,8 @@ help:
 	@echo "    lint           Check code style with ruff"
 	@echo "    format         Format code with ruff (and apply autofixes)"
 	@echo "    clean          Remove build artifacts and cache files"
+	@echo "    docs           Build the documentation site (strict) into site/"
+	@echo "    docs-serve     Serve the documentation with live reload"
 	@echo ""
 	@echo "  Docker:"
 	@echo "    docker-build   Build Docker image locally"
@@ -148,10 +150,17 @@ format:
 	$(PYTHON) -m ruff check --fix $(LINT_PATHS)
 	$(PYTHON) -m ruff format $(LINT_PATHS)
 
+## Documentation (MkDocs Material). Install with: pip install -e ".[docs]"
+docs:
+	$(PYTHON) -m mkdocs build --strict
+
+docs-serve:
+	$(PYTHON) -m mkdocs serve
+
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null; \
 	find . -type f -name "*.pyc" -delete 2>/dev/null; \
-	rm -rf .pytest_cache htmlcov .coverage dist build *.egg-info src/*.egg-info
+	rm -rf .pytest_cache htmlcov .coverage dist build site *.egg-info src/*.egg-info
 
 # =========================================================================
 # Docker

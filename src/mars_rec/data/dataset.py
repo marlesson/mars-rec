@@ -207,10 +207,11 @@ class InteractionsDataset(Dataset):
     :param project_config: The project's :class:`ProjectConfig`.
     :param index_mapping: ``{column_name: {raw: int_index}}`` used by
         a few negative-sampler variants to draw ids from the catalog.
-    :param candidate_feature_lookup: Optional dict (or 0-/1-arg
-        callable returning a dict) that overrides target-derived input
-        columns when a row is reused as a negative sample, keeping the
-        forward features consistent with the swapped item id.
+
+    The optional ``candidate_feature_lookup`` keyword argument (a dict, or
+    a 0-/1-arg callable returning a dict) overrides target-derived input
+    columns when a row is reused as a negative sample, keeping the
+    forward features consistent with the swapped item id.
     """
 
     # Columns whose values are derived from the candidate item id and which
@@ -1907,8 +1908,9 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
             ``None`` (default) keeps the full eligible set; an int caps it
             via random subsample. Useful to bound memory when the pool is
             very wide (e.g. > 10 k items per row).
-        Other args inherit from the parent (``candidates_per_slot``,
-        ``warmup_steps``, ``negative_proportion``).
+
+    Other args inherit from the parent (``candidates_per_slot``,
+    ``warmup_steps``, ``negative_proportion``).
     """
 
     def __init__(
@@ -2104,7 +2106,8 @@ class InteractionsWithMixedDnsUniformDataset(
     Args:
         uniform_fraction: ∈ [0, 1]. Probability a slot is filled via uniform
             random instead of DNS K-candidate mining. Default 0.3.
-        Other args inherit from ``InteractionsWithDynamicNegativeMiningDataset``.
+
+    Other args inherit from ``InteractionsWithDynamicNegativeMiningDataset``.
     """
 
     def __init__(
