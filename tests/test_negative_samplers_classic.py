@@ -155,7 +155,10 @@ class TestPopularityBased:
         ds = InteractionsWithPopularityBasedNegativeSamplingDataset(
             df.assign(pop=0.0), None, config, index_mapping, popularity_column="pop"
         )
-        np.testing.assert_allclose(ds._item_probabilities, np.full(9, 1 / 9))
+        # Uniform over the real items 2..8 only; slots 0/1 get no mass.
+        expected = np.full(9, 1 / 7)
+        expected[:2] = 0.0
+        np.testing.assert_allclose(ds._item_probabilities, expected)
 
     def test_negatives_differ_from_source(self, config, index_mapping, df):
         ds = InteractionsWithPopularityBasedNegativeSamplingDataset(
@@ -181,7 +184,7 @@ class TestHardNegativeMining:
         assert isinstance(ds._hard_negatives[1], list)
         np.random.seed(0)
         neg = _assert_contract(ds, 7, 7)
-        assert all(0 <= it <= 8 for it in neg.tolist())
+        assert set(neg.tolist()) <= set(ITEMS)
         _assert_index_forms(ds, 7)
 
     def test_hard_candidates_used_when_present(self, config, index_mapping, df):
@@ -198,7 +201,7 @@ class TestHardNegativeMining:
         assert ds._has_hard_negatives is False
         np.random.seed(0)
         neg = _assert_contract(ds, 7, 7)
-        assert all(0 <= it <= 8 for it in neg.tolist())
+        assert set(neg.tolist()) <= set(ITEMS)
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +265,7 @@ class TestTimeAware:
         ds = InteractionsWithTimeAwareNegativeSamplingDataset(ts_df, None, config, index_mapping)
         assert ds._sample_item_before(0, exclude=9) == 2  # only item 2 exists at t=0
         # Before any item exists → uniform fallback over the catalog.
-        assert 0 <= ds._sample_item_before(-1, exclude=2) <= 8
+        assert ds._sample_item_before(-1, exclude=2) in set(ITEMS) - {2}
 
     def test_rejection_exhausted_returns_other_item(self, config, index_mapping, ts_df, monkeypatch):
         ds = InteractionsWithTimeAwareNegativeSamplingDataset(ts_df, None, config, index_mapping)
@@ -280,7 +283,7 @@ class TestTimeAware:
     def test_without_timestamps_uses_uniform(self, config, index_mapping, df):
         ds = InteractionsWithTimeAwareNegativeSamplingDataset(df, None, config, index_mapping, negative_proportion=0.5)
         assert ds._timestamps is None and ds._item_first_seen is None
-        assert 0 <= ds._sample_item_before(0, exclude=2) <= 8
+        assert ds._sample_item_before(0, exclude=2) in set(ITEMS) - {2}
         np.random.seed(0)
         _assert_contract(ds, 7, 7)
 
@@ -381,8 +384,8 @@ class TestDNSCandidateProvider:
         cands = ds._draw_candidates([0, 0, 1, 2, 2], np.array([2, 3, 2, 2, 3]), K=4)
         assert cands.shape == (5, 4)
         assert cands[0].tolist() == [3, 3, 3, 3]  # pool of one → with replacement
-        assert all(0 <= c <= 8 and c != 3 for c in cands[1])  # pool empty after exclude → uniform
-        assert all(0 <= c <= 8 and c != 2 for c in cands[2])  # empty pool → uniform
+        assert all(c in ITEMS and c != 3 for c in cands[1])  # pool empty after exclude → uniform
+        assert all(c in ITEMS and c != 2 for c in cands[2])  # empty pool → uniform
         assert set(cands[3].tolist()) <= {3, 5, 7}
         assert set(cands[4].tolist()) <= {5, 7}  # 3 is excluded
 

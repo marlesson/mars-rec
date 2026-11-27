@@ -23,7 +23,6 @@ Usage (CLI)::
 import glob
 import json
 import logging
-import math
 import os
 import pickle
 import time
@@ -47,7 +46,7 @@ from mars_rec.utils.files import (
     get_params,
     get_index_mapping_path,
 )
-from mars_rec.utils.index_mapping import transform_with_indexing
+from mars_rec.utils.index_mapping import is_reserved_key, transform_with_indexing
 from mars_rec.utils.logging import banner, setup_logging
 from mars_rec.utils.reflection import load_attr
 
@@ -304,19 +303,10 @@ def build_reverse_item_mapping(
     fwd = index_mapping.get(output_column, {})
     rev = {}
     for raw_val, idx in fwd.items():
-        if idx == 0 or _is_reserved_key(raw_val):
+        if idx == 0 or is_reserved_key(raw_val):
             continue
         rev[int(idx)] = raw_val
     return rev
-
-
-def _is_reserved_key(raw_val: Any) -> bool:
-    """True for the sentinel keys of ``create_index_mapping`` (None, NaN, -1)."""
-    if raw_val is None:
-        return True
-    if isinstance(raw_val, float) and math.isnan(raw_val):
-        return True
-    return str(raw_val) == "-1"
 
 
 def reserved_logit_indices(rev_map: Dict[int, Any], n_classes: int) -> List[int]:

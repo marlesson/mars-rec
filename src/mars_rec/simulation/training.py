@@ -124,6 +124,7 @@ from mars_rec.utils.index_mapping import (
     create_index_mapping_from_arrays,
     transform_with_indexing,
     map_array,
+    real_indices,
 )
 from mars_rec.utils.plot import (
     plot_history,
@@ -1523,15 +1524,14 @@ class SupervisedModelTraining(TorchModelTraining):
         return self._cached_candidate_provider
 
     def _full_catalog_idx(self) -> np.ndarray:
-        """Cached int64 array of every catalog item idx (skip OOV=0, PAD=1)."""
+        """Cached int64 array of every real catalog item idx (see ``real_indices``)."""
         if hasattr(self, "_cached_full_catalog_idx"):
             return self._cached_full_catalog_idx
         item_map = self.index_mapping.get(
             self.project_config.item_column.name,
             {},
         )
-        idx = sorted(int(v) for k, v in item_map.items() if k is not None and int(v) > 1)
-        self._cached_full_catalog_idx = np.asarray(idx, dtype=np.int64)
+        self._cached_full_catalog_idx = real_indices(item_map)
         return self._cached_full_catalog_idx
 
     def _get_cached_trained_module(self) -> nn.Module:

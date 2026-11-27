@@ -35,7 +35,7 @@ import random
 from torch.utils.data import Dataset
 
 from mars_rec.meta_config import ProjectConfig, IOType, Column
-from mars_rec.utils.index_mapping import map_array
+from mars_rec.utils.index_mapping import map_array, real_indices
 from mars_rec.utils.utils import parallel_literal_eval
 from multiprocessing.pool import Pool
 import os
@@ -182,6 +182,43 @@ def _choose_except(values: list, exception: Any) -> int:
     if not filtered:
         return values[0] if values else exception
     return random.choice(filtered)
+
+
+def _choose_from_pool_except(pool: np.ndarray, exception: int) -> int:
+    """Uniform draw from ``pool`` that avoids ``exception`` when possible.
+
+    Degenerate pools mirror :func:`_rand_int_except`: an empty pool returns
+    ``exception`` and a single-item pool returns that item.
+    """
+    n = len(pool)
+    if n == 0:
+        return int(exception)
+    if n == 1:
+        return int(pool[0])
+    for _ in range(32):
+        pick = int(pool[np.random.randint(0, n)])
+        if pick != exception:
+            return pick
+    others = pool[pool != exception]
+    return int(others[np.random.randint(0, len(others))]) if others.size else int(pool[0])
+
+
+def _choice_except(probs: np.ndarray, exception: int) -> Optional[int]:
+    """Draw an index from ``probs`` with ``exception``'s mass removed.
+
+    Returns ``None`` when no other index has positive probability, so the
+    caller can fall back instead of resampling forever.
+    """
+    if 0 <= exception < len(probs) and probs[exception] > 0:
+        p = probs.copy()
+        p[exception] = 0.0
+        total = p.sum()
+        if total <= 0:
+            return None
+        p /= total
+    else:
+        p = probs
+    return int(np.random.choice(len(p), p=p))
 
 
 class InteractionsDataset(Dataset):
@@ -678,6 +715,57 @@ class InteractionsDataset(Dataset):
                 input_list[n_packed + offset] = self._embeddings_for_metadata[col.name][new_item_indices]
                 offset += 1
 
+    # ------------------------------------------------------------------
+    # Negative-sampling helpers shared by the subclasses
+    # ------------------------------------------------------------------
+
+    @property
+    def _negative_item_pool(self) -> np.ndarray:
+        """Real item indices (``<= _max_item_idx``) that may be drawn as negatives.
+
+        Excludes the reserved index-mapping slots (unknown, NaN, pad; see
+        :func:`~mars_rec.utils.index_mapping.real_indices`), so a negative is
+        always a real catalog item. Falls back to the legacy
+        ``[0, _max_item_idx]`` range when the item mapping has no real
+        entries (e.g. a hand-built mapping). Requires ``_max_item_idx``.
+        """
+        pool = self.__dict__.get("_negative_item_pool_cache")
+        if pool is None:
+            max_idx = int(self._max_item_idx)
+            item_map = self._index_mapping.get(self._project_config.item_column.name) or {}
+            pool = real_indices(item_map)
+            pool = pool[pool <= max_idx]
+            if pool.size == 0:
+                pool = np.arange(0, max_idx + 1, dtype=np.int64)
+            self._negative_item_pool_cache = pool
+        return pool
+
+    def _random_negative(self, exclude: int) -> int:
+        """Uniform negative from :attr:`_negative_item_pool`, avoiding ``exclude``."""
+        return _choose_from_pool_except(self._negative_item_pool, int(exclude))
+
+    def _resample_except(self, probs: np.ndarray, exclude: int) -> int:
+        """Redraw from ``probs`` avoiding ``exclude``; uniform pool fallback when it holds all the mass."""
+        pick = _choice_except(probs, exclude)
+        return self._random_negative(exclude) if pick is None else pick
+
+    def _restrict_to_pool(self, weights: np.ndarray) -> np.ndarray:
+        """Normalise ``weights`` (indexed by item idx) into a distribution over the pool.
+
+        Mass outside :attr:`_negative_item_pool` (e.g. reserved slots) is
+        dropped; when nothing in the pool has positive weight the result is
+        uniform over the pool.
+        """
+        in_pool = np.zeros(len(weights), dtype=bool)
+        pool = self._negative_item_pool
+        in_pool[pool[pool < len(weights)]] = True
+        w = np.where(in_pool, np.asarray(weights, dtype=np.float64), 0.0)
+        total = w.sum()
+        if total <= 0:
+            w = in_pool.astype(np.float64)
+            total = w.sum()
+        return w / total
+
 
 class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):
     """Uniform-random negative sampling over the full catalog.
@@ -685,8 +773,8 @@ class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):
     Extends :class:`InteractionsDataset` by stretching ``__len__`` to
     include negative slots and producing them in ``__getitem__`` by
     copying a positive row and replacing the item id with a uniformly
-    random index in ``[0, max_item_idx]`` (excluding the original
-    positive). The ``negative_proportion`` controls the share of
+    random real item (see :attr:`InteractionsDataset._negative_item_pool`),
+    excluding the original positive. The ``negative_proportion`` controls the share of
     negatives in the materialised epoch.
 
     This is the default choice for "BCE + implicit feedback" projects
@@ -730,10 +818,7 @@ class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = np.array(
-                [
-                    _rand_int_except(0, self._max_item_idx + 1, exception=item_idx)
-                    for item_idx in negative_input[self._item_input_index]
-                ]
+                [self._random_negative(item_idx) for item_idx in negative_input[self._item_input_index]]
             )
             self._relookup_metadata(
                 negative_input,
@@ -899,9 +984,7 @@ class InteractionsWithPopularityBasedNegativeSamplingDataset(InteractionsDataset
                 if 0 <= item_idx <= self._max_item_idx:
                     freq[item_idx] = count
 
-        freq = np.power(freq, smoothing_factor)
-        total = freq.sum()
-        self._item_probabilities = freq / total if total > 0 else np.ones_like(freq) / len(freq)
+        self._item_probabilities = self._restrict_to_pool(np.power(freq, smoothing_factor))
 
     def __len__(self) -> int:
         return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
@@ -931,8 +1014,8 @@ class InteractionsWithPopularityBasedNegativeSamplingDataset(InteractionsDataset
             )
             # Ensure sampled item differs from the original positive item
             for i in range(num_of_negatives):
-                while new_items[i] == original_items[i]:
-                    new_items[i] = np.random.choice(len(self._item_probabilities), p=self._item_probabilities)
+                if new_items[i] == original_items[i]:
+                    new_items[i] = self._resample_except(self._item_probabilities, int(original_items[i]))
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items.astype(np.int64)
@@ -1032,11 +1115,11 @@ class InteractionsWithHardNegativeMiningDataset(InteractionsDataset):
                 if len(candidates) > 0:
                     new_items[i] = _choose_except(list(candidates), original_items[i])
                 else:
-                    new_items[i] = _rand_int_except(0, self._max_item_idx + 1, original_items[i])
+                    new_items[i] = self._random_negative(original_items[i])
 
             # Random negatives for the rest
             for i in range(num_hard, num_of_negatives):
-                new_items[i] = _rand_int_except(0, self._max_item_idx + 1, original_items[i])
+                new_items[i] = self._random_negative(original_items[i])
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
@@ -1130,10 +1213,7 @@ class InteractionsWithInBatchNegativesDataset(InteractionsDataset):
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = np.array(
-                [
-                    _rand_int_except(0, self._max_item_idx + 1, item_idx)
-                    for item_idx in negative_input[self._item_input_index]
-                ]
+                [self._random_negative(item_idx) for item_idx in negative_input[self._item_input_index]]
             )
             negative_input = self._apply_candidate_features(
                 negative_input,
@@ -1246,12 +1326,12 @@ class InteractionsWithTimeAwareNegativeSamplingDataset(InteractionsDataset):
     def _sample_item_before(self, timestamp: float, exclude: int) -> int:
         """Sample a random item whose first_seen <= timestamp, excluding `exclude`."""
         if self._item_first_seen is None:
-            return _rand_int_except(0, self._max_item_idx + 1, exclude)
+            return self._random_negative(exclude)
 
         # Binary search for the rightmost item with first_seen <= timestamp
         pos = np.searchsorted(self._first_seen_sorted, timestamp, side="right")
         if pos == 0:
-            return _rand_int_except(0, self._max_item_idx + 1, exclude)
+            return self._random_negative(exclude)
 
         eligible = self._items_sorted_by_time[:pos]
         if len(eligible) <= 1:
@@ -1290,7 +1370,7 @@ class InteractionsWithTimeAwareNegativeSamplingDataset(InteractionsDataset):
                 )
             else:
                 new_items = np.array(
-                    [_rand_int_except(0, self._max_item_idx + 1, item_idx) for item_idx in original_items],
+                    [self._random_negative(item_idx) for item_idx in original_items],
                     dtype=np.int64,
                 )
 
@@ -1361,13 +1441,10 @@ class InteractionsWithCurriculumNegativeSamplingDataset(InteractionsDataset):
             if 0 <= item_idx <= self._max_item_idx:
                 freq[item_idx] = count
 
-        freq_smooth = np.power(freq, smoothing_factor)
-        total = freq_smooth.sum()
-        self._popularity_probs = freq_smooth / total if total > 0 else np.ones_like(freq_smooth) / len(freq_smooth)
+        self._popularity_probs = self._restrict_to_pool(np.power(freq, smoothing_factor))
 
-        # Uniform distribution
-        self._uniform_probs = np.ones(self._max_item_idx + 1, dtype=np.float64)
-        self._uniform_probs /= self._uniform_probs.sum()
+        # Uniform distribution over the real items
+        self._uniform_probs = self._restrict_to_pool(np.ones(self._max_item_idx + 1, dtype=np.float64))
 
         self._update_sampling_distribution()
 
@@ -1414,8 +1491,8 @@ class InteractionsWithCurriculumNegativeSamplingDataset(InteractionsDataset):
                 p=self._current_probs,
             )
             for i in range(num_of_negatives):
-                while new_items[i] == original_items[i]:
-                    new_items[i] = np.random.choice(len(self._current_probs), p=self._current_probs)
+                if new_items[i] == original_items[i]:
+                    new_items[i] = self._resample_except(self._current_probs, int(original_items[i]))
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items.astype(np.int64)
@@ -1552,7 +1629,7 @@ class InteractionsWithEmbeddingHardNegativeDataset(InteractionsDataset):
                 )
                 want_uniform = (i < n_uniform) or (neighbours.size == 0)
                 if want_uniform:
-                    new_items[i] = _rand_int_except(0, self._max_item_idx + 1, src)
+                    new_items[i] = self._random_negative(src)
                 else:
                     pick = int(np.random.choice(neighbours))
                     if pick == src and neighbours.size > 1:
@@ -1631,8 +1708,7 @@ class InteractionsWithCandidateProviderNegativeDataset(InteractionsDataset):
             )
 
         item_map = index_mapping.get(project_config.item_column.name, {}) or {}
-        idx = sorted(int(v) for k, v in item_map.items() if k is not None and int(v) > 1)
-        self._full_catalog = np.asarray(idx, dtype=np.int64)
+        self._full_catalog = real_indices(item_map)
 
     def __len__(self) -> int:
         return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
@@ -1660,11 +1736,7 @@ class InteractionsWithCandidateProviderNegativeDataset(InteractionsDataset):
                 row = self._df_for_rows.iloc[int(src_pos_idx)].to_dict()
                 eligible = self._provider.get_candidates(row, self._full_catalog)
                 if eligible is None or len(eligible) == 0:
-                    new_items[i] = _rand_int_except(
-                        0,
-                        self._max_item_idx + 1,
-                        int(original_items[i]),
-                    )
+                    new_items[i] = self._random_negative(int(original_items[i]))
                     continue
                 pick = int(np.random.choice(eligible))
                 if pick == int(original_items[i]) and len(eligible) > 1:
@@ -1771,11 +1843,7 @@ class InteractionsWithDynamicNegativeMiningDataset(InteractionsDataset):
         for i, it in enumerate(original_items):
             src = int(it)
             for k in range(K):
-                cand_items[i, k] = _rand_int_except(
-                    0,
-                    self._max_item_idx + 1,
-                    src,
-                )
+                cand_items[i, k] = self._random_negative(src)
         return cand_items
 
     def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
@@ -1955,8 +2023,7 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
             )
 
         item_map = index_mapping.get(project_config.item_column.name, {}) or {}
-        idx = sorted(int(v) for k, v in item_map.items() if k is not None and int(v) > 1)
-        self._full_catalog = np.asarray(idx, dtype=np.int64)
+        self._full_catalog = real_indices(item_map)
         # Reset-index'd copy so iloc[src_pos_idx] is well-defined regardless
         # of any upstream reindexing / shuffling done by the prep pipeline.
         self._df_for_rows = data_frame.reset_index(drop=True)
@@ -2067,11 +2134,7 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
             if eligible.size == 0:
                 # No eligibles — fall back to uniform.
                 for k in range(K):
-                    cand_items[i, k] = _rand_int_except(
-                        0,
-                        self._max_item_idx + 1,
-                        exclude,
-                    )
+                    cand_items[i, k] = self._random_negative(exclude)
                 continue
             if eligible.size >= K:
                 cand_items[i, :] = np.random.choice(
@@ -2354,9 +2417,7 @@ class InteractionsWithMixedHardNegativeDataset(InteractionsDataset):
             for item_idx, count in counts.items():
                 if 0 <= int(item_idx) <= self._max_item_idx:
                     freq[int(item_idx)] = float(count)
-        freq = np.power(freq, smoothing_factor)
-        total_pop = freq.sum()
-        self._popularity_probs = freq / total_pop if total_pop > 0 else np.ones_like(freq) / len(freq)
+        self._popularity_probs = self._restrict_to_pool(np.power(freq, smoothing_factor))
 
     def __len__(self) -> int:
         return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
@@ -2365,15 +2426,7 @@ class InteractionsWithMixedHardNegativeDataset(InteractionsDataset):
         if source == "ann":
             if self._neighbors_by_idx and 0 <= src <= self._max_item_idx and self._neighbors_by_idx[src].size > 0:
                 pick = int(np.random.choice(self._neighbors_by_idx[src]))
-                return (
-                    pick
-                    if pick != src
-                    else _rand_int_except(
-                        0,
-                        self._max_item_idx + 1,
-                        src,
-                    )
-                )
+                return pick if pick != src else self._random_negative(src)
             source = "pop"
         if source == "pop":
             pick = int(
@@ -2382,16 +2435,8 @@ class InteractionsWithMixedHardNegativeDataset(InteractionsDataset):
                     p=self._popularity_probs,
                 )
             )
-            return (
-                pick
-                if pick != src
-                else _rand_int_except(
-                    0,
-                    self._max_item_idx + 1,
-                    src,
-                )
-            )
-        return _rand_int_except(0, self._max_item_idx + 1, src)
+            return pick if pick != src else self._random_negative(src)
+        return self._random_negative(src)
 
     def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):

@@ -22,6 +22,11 @@ reserved slots (`max(index) + 1`), so pass them straight to `nn.Embedding`:
 self.item_emb = nn.Embedding(self._n_items, n_factors, padding_idx=2)  # 2 = pad
 ```
 
+The framework never treats a reserved slot as an item:
+`mars_rec.utils.index_mapping.real_indices(mapping)` returns the real indices and is the single
+definition used by inference (top-k and logit masking), candidate providers and every negative
+sampler, so a reserved slot is never drawn as a negative either.
+
 ## Shared vocabularies
 
 A column declared with `same_index_as="item_id"` reuses the item column's mapping. This is how a
