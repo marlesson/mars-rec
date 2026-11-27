@@ -50,6 +50,7 @@ src/mars_rec/          # Framework source code (the only installable package)
   luigi.cfg                 # Default Luigi configuration
   data/
     dataset.py              # PyTorch Datasets (InteractionsDataset and negative sampling variants)
+    candidate_features.py   # Per-candidate feature rewrite (lookup + hook), shared by samplers/eval/inference
     task.py                 # BasePrepareDataFrames — Luigi task for train/val/test split
     utils.py                # DownloadDataset helper
   model/

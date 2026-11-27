@@ -64,7 +64,6 @@ FEATURE_ROLES = {
     "temporal",
     "scalar",
     "categorical",
-    "mood",
     "session",
     "tag",
     "other",
@@ -97,7 +96,6 @@ ROLE_COLORS = {
     "temporal": "#F39C12",
     "scalar": "#95A5A6",
     "categorical": "#4A90D9",
-    "mood": "#9B59B6",
     "session": "#9B59B6",
     "tag": "#E67E22",
     "other": "#95A5A6",
@@ -259,12 +257,11 @@ _FEATURE_ROLE_PATTERNS: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"user_cf|user_bpr"), "user_cf"),
     (re.compile(r"^age|gender|country|culture|lang|^age5"), "user_profile"),
     (re.compile(r"text_emb|user_query|assist.*response|goal_text|^text_"), "text"),
-    (re.compile(r"goal_|progress|listener_goal"), "goal"),
-    (re.compile(r"mood_cluster|mood_seq"), "mood"),
+    (re.compile(r"goal_|progress"), "goal"),
     (re.compile(r"session_year|session_week|session_quarter|holiday|session_progress"), "session"),
     (re.compile(r"^dow|^month|^year|day_of_year|^week"), "temporal"),
     (re.compile(r"^tag"), "tag"),
-    (re.compile(r"^target|^track_id$|^album_id$|^artist_id$"), "target"),
+    (re.compile(r"^target"), "target"),
 ]
 
 _BLOCK_ROLE_PATTERNS: List[Tuple[re.Pattern, str]] = [
@@ -393,12 +390,11 @@ def _group_features_by_role(
         "text": 4,
         "goal": 5,
         "target": 6,
-        "mood": 7,
-        "tag": 8,
-        "session": 9,
-        "temporal": 10,
-        "categorical": 11,
-        "scalar": 12,
+        "tag": 7,
+        "session": 8,
+        "temporal": 9,
+        "categorical": 10,
+        "scalar": 11,
         "other": 99,
     }
     groups.sort(key=lambda g: (role_order.get(g.role, 99), not g.starred, g.label))

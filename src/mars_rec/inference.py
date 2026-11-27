@@ -34,6 +34,13 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 
+from mars_rec.data.candidate_features import (
+    FN_PARAM as CANDIDATE_FN_PARAM,
+    LOOKUP_PARAM as CANDIDATE_LOOKUP_PARAM,
+    apply_candidate_features_to_frame,
+    resolve_candidate_lookup,
+    validate_candidate_feature_fn,
+)
 from mars_rec.data.dataset import (
     InteractionsDataset,
     preprocess_interactions_data_frame,
@@ -1080,13 +1087,14 @@ def score_candidates_bce(
     The eligible set comes from ``candidate_provider`` when supplied; when
     omitted the full catalog is used (the legacy behaviour).
 
-    Per-candidate target features (e.g. popularity, release_year_bucket)
-    typically need to be overridden so the model sees the candidate's own
-    metadata rather than the row's placeholder values. The optional
-    ``candidate_feature_overrides`` callback receives the expanded chunk
-    DataFrame and the full per-chunk candidate idx vector and should
-    return the chunk DataFrame with project-specific columns rewritten in
-    place.
+    Item-dependent input columns must describe each candidate, not the
+    row's original item. By default the project's ``candidate_feature_lookup``
+    / ``candidate_feature_fn`` (from ``dataset_extra_params``) are applied
+    through :func:`mars_rec.data.candidate_features.apply_candidate_features_to_frame`,
+    exactly as in training. The optional ``candidate_feature_overrides``
+    callback replaces that default: it receives the expanded chunk DataFrame
+    and the full per-chunk candidate idx vector and should return the chunk
+    DataFrame with project-specific columns rewritten in place.
 
     Args:
         model: trained nn.Module returning a single logit per row.
@@ -1116,26 +1124,15 @@ def score_candidates_bce(
     n_turns = len(df_processed)
     full_catalog = np.asarray(full_catalog, dtype=np.int64)
 
-    # Warn loudly when the project
-    # config declares a candidate_feature_lookup but the caller forgot to
-    # pass candidate_feature_overrides. Without the callback, every
-    # candidate is scored against the row's placeholder metadata, which
-    # collapses the ranking signal silently. We can't auto-wire the
-    # override (the callback factory lives in the user project), but we can
-    # surface the foot-gun the moment it would actually take effect.
-    if (
-        candidate_feature_overrides is None
-        and project_config.dataset_extra_params
-        and project_config.dataset_extra_params.get("candidate_feature_lookup") is not None
-    ):
-        logger.warning(
-            "score_candidates_bce: project_config declares "
-            "`candidate_feature_lookup` but no `candidate_feature_overrides` "
-            "callback was passed. Per-candidate target features will keep "
-            "the row's placeholder values for every candidate — scores will "
-            "be near-constant across the catalog. If this is intentional, "
-            "ignore; otherwise see PREDICT_SUBMISSION_BUGS.md / Bug 7."
-        )
+    # Without an explicit override callback, apply the project's
+    # ``candidate_feature_lookup`` / ``candidate_feature_fn`` with the same
+    # helper the negative samplers and the training-time evaluation use.
+    extra = project_config.dataset_extra_params or {}
+    default_lookup = None
+    default_fn = None
+    if candidate_feature_overrides is None:
+        default_lookup = resolve_candidate_lookup(extra.get(CANDIDATE_LOOKUP_PARAM), index_mapping)
+        default_fn = validate_candidate_feature_fn(extra.get(CANDIDATE_FN_PARAM))
 
     out_scores: List[torch.Tensor] = []
     out_eligible: List[np.ndarray] = []
@@ -1183,6 +1180,15 @@ def score_candidates_bce(
                 expanded,
                 cand_array,
                 row_offsets,
+            )
+        elif default_lookup or default_fn is not None:
+            expanded = apply_candidate_features_to_frame(
+                expanded,
+                cand_array,
+                project_config.input_columns,
+                default_lookup,
+                default_fn,
+                item_column_name=item_col,
             )
 
         ds = InteractionsDataset(expanded, embeddings_for_metadata, project_config, index_mapping)

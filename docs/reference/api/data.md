@@ -12,6 +12,11 @@ Data preparation (Luigi tasks) and the PyTorch `Dataset` classes used during tra
       heading_level: 2
       show_root_full_path: true
 
+::: mars_rec.data.candidate_features
+    options:
+      heading_level: 2
+      show_root_full_path: true
+
 ::: mars_rec.data.utils
     options:
       heading_level: 2
