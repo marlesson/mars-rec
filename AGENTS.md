@@ -211,7 +211,7 @@ Inference never returns a reserved slot as a recommendation: `build_reverse_item
 
 ### 6. Luigi caching and --no-cache
 
-Luigi marks tasks as DONE based on the existence of output files. If a training run fails midway but the output directory was already created, Luigi may consider the task complete. To force re-execution:
+Luigi marks tasks as DONE based on the existence of output files. For `SupervisedModelTraining` the output is the `<task_id>/_SUCCESS` marker, written as the very last step of `run()`, so a run killed midway is re-executed instead of being treated as done. Use `task.task_dir` (not `task.output().path`) for the run directory. Legacy flat-layout runs without the marker count as done when they have a checkpoint and `metadata.json` (`utils/files.py::is_complete_run`). To force re-execution of a finished run:
 
 - Use `--no-cache` in the CLI: `mars-rec run supervised --no-cache ...`
 - Manually delete the output directory, OR
@@ -413,7 +413,7 @@ mars-rec visualize --task-id <ID> --mode summary         # text table
 |---|---|---|
 | `RuntimeError: target size != input size` | `forward()` returns wrong shape for the chosen loss | BCE/MSE → `[batch]` (use `.squeeze(-1)`); CE → `[batch, n_items]` |
 | `ModuleNotFoundError: No module named 'examples'` (or your project package) | PYTHONPATH doesn't include project root | Run from the project root or `PYTHONPATH=. python ...` |
-| `Luigi task already DONE` | Output dir exists from a previous run | Use `--no-cache`, delete the output directory, or change a parameter (e.g. `--observation`) |
+| `Luigi task already DONE` | A finished run with the same parameters exists (`_SUCCESS` marker) | Use `--no-cache`, delete the output directory, or change a parameter (e.g. `--observation`) |
 | `KeyError` in index_mapping | INDEXABLE column not found in DataFrame | Verify ProjectConfig column names match the CSV |
 | `PermissionError` on cleanup | File locked by a previous process | Manually delete the output directory |
 | `issubclass() arg 1 must be a class` | `load_attr` returned an instance instead of a class | `recommender_module_class` must point to the CLASS, not an instance |

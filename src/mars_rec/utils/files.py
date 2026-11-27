@@ -4,6 +4,7 @@ Every training run writes its outputs under
 ``OUTPUT_PATH/models/<TaskClass>/results/<task_id>/``, grouped by who
 consumes them::
 
+    _SUCCESS                         # Empty marker written when the run finished (Luigi completion)
     params.json                      # Luigi parameters this run was launched with
     metadata.json                    # Run summary: environment, history, test metrics, artifact list
     model/                           # Everything inference needs
@@ -106,6 +107,25 @@ def get_metadata(task_dir: str) -> dict:
     """Load and return the parsed ``metadata.json`` for a training task."""
     with open(get_metadata_path(task_dir), "r") as f:
         return json.load(f)
+
+
+def get_success_marker_path(task_dir: str) -> str:
+    """Path to the ``_SUCCESS`` marker, written as the very last step of a successful run."""
+    return os.path.join(task_dir, "_SUCCESS")
+
+
+def is_complete_run(task_dir: str) -> bool:
+    """Whether ``task_dir`` holds a finished training run.
+
+    A run is finished when its ``_SUCCESS`` marker exists. Runs written by
+    versions that predate the marker use the flat layout (no ``model/``
+    directory); they count as finished when they have both a checkpoint and
+    ``metadata.json``, the last artifact those versions wrote.
+    """
+    if os.path.isfile(get_success_marker_path(task_dir)):
+        return True
+    is_legacy_layout = not os.path.isdir(get_model_dir(task_dir))
+    return is_legacy_layout and os.path.isfile(get_metadata_path(task_dir)) and find_checkpoint(task_dir) is not None
 
 
 # ---------------------------------------------------------------------------

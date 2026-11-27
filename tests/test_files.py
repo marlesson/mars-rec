@@ -148,3 +148,29 @@ def test_list_artifacts_is_recursive_and_relative(tmp_path):
         "model/weights.ckpt",
         "params.json",
     ]
+
+
+class TestIsCompleteRun:
+    def test_empty_dir_is_incomplete(self, tmp_path):
+        assert not files.is_complete_run(str(tmp_path))
+
+    def test_marker_means_complete(self, tmp_path):
+        _touch(files.get_success_marker_path(str(tmp_path)))
+        assert files.is_complete_run(str(tmp_path))
+
+    def test_new_layout_without_marker_is_incomplete(self, tmp_path):
+        """Even with every artifact on disk: the marker is the only signal for new runs."""
+        task_dir = str(tmp_path)
+        _touch(files.get_weights_path(task_dir))
+        _touch(files.get_metadata_path(task_dir))
+        assert not files.is_complete_run(task_dir)
+
+    def test_legacy_flat_run_with_metadata_is_complete(self, tmp_path):
+        task_dir = str(tmp_path)
+        _touch(os.path.join(task_dir, "weights.ckpt"))
+        _touch(os.path.join(task_dir, "metadata.json"))
+        assert files.is_complete_run(task_dir)
+
+    def test_legacy_flat_run_without_metadata_is_incomplete(self, tmp_path):
+        _touch(os.path.join(str(tmp_path), "weights.ckpt"))
+        assert not files.is_complete_run(str(tmp_path))

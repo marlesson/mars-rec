@@ -153,8 +153,26 @@ class TestTrainingArtifacts:
         """Everything except the run identity / summary lives in a sub-directory."""
         files_at_root = {p.name for p in trained_run.task_dir.iterdir() if p.is_file()}
         dirs_at_root = {p.name for p in trained_run.task_dir.iterdir() if p.is_dir()}
-        assert files_at_root == {"params.json", "metadata.json"}
+        assert files_at_root == {"_SUCCESS", "params.json", "metadata.json"}
         assert dirs_at_root == {"model", "training", "eval"}
+
+    def test_finished_run_is_complete(self, trained_run, monkeypatch):
+        """``_SUCCESS`` is the Luigi output; a rebuilt task sees the run as done."""
+        monkeypatch.chdir(trained_run.root)
+        task = _build_task()
+        assert task.task_id == trained_run.task_id
+        assert task.output().path.endswith("_SUCCESS")
+        assert task.complete()
+
+    def test_run_without_marker_is_not_complete(self, trained_run, monkeypatch):
+        """A directory left by a killed run (no ``_SUCCESS``) must be re-run by Luigi."""
+        monkeypatch.chdir(trained_run.root)
+        marker = trained_run.task_dir / "_SUCCESS"
+        marker.unlink()
+        try:
+            assert not _build_task().complete()
+        finally:
+            marker.touch()
 
     def test_metadata_lists_artifacts_with_relative_paths(self, trained_run):
         artifacts = trained_run.metadata["artifacts"]

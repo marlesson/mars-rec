@@ -7,6 +7,7 @@ Every training run writes to `$OUTPUT_PATH/models/SupervisedModelTraining/result
 
 ```text
 <task_id>/
+├── _SUCCESS                         # Empty marker written when the run finished
 ├── params.json                      # Every parameter of the run
 ├── metadata.json                    # Run summary: environment, history, test metrics, artifact list
 ├── model/                           # Everything inference needs — copy this folder to serve the model
@@ -61,10 +62,12 @@ the task parameters**. Two runs with identical parameters share the same id and 
 
 ## Caching and `--no-cache`
 
-Luigi considers a task **done** when its output exists. Re-running an identical command is
-therefore a no-op, which also applies to a run that crashed after creating its output directory.
+Luigi considers a training task **done** when its `_SUCCESS` marker exists. The marker is the last
+thing a run writes, so re-running an identical command after a finished run is a no-op, while a
+run that was killed mid-way (its directory exists, the marker does not) is trained again. Runs from
+versions that predate the marker count as done when they have a checkpoint and `metadata.json`.
 
-To force a re-run, use one of these:
+To force a re-run of a finished task, use one of these:
 
 - `mars-rec run supervised --no-cache ...` invalidates the data-prep and training outputs
   (`task.invalidate_cache()`) before scheduling;

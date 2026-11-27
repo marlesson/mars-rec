@@ -133,7 +133,9 @@ from mars_rec.utils.files import (
     get_task_dir,
     get_tensorboard_logdir,
     get_test_set_predictions_path,
+    get_success_marker_path,
     get_training_logs_dir,
+    is_complete_run,
     list_artifacts,
     validate_eval_name,
 )
@@ -265,7 +267,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
     negative_proportion: float = luigi.FloatParameter(0.0)
 
     def invalidate_cache(self):
-        """Delete all cached outputs for this task and its data preparation dependency."""
+        """Delete all cached outputs for this task (the whole :attr:`task_dir`) and its data preparation dependency."""
         # Invalidate data preparation outputs
         prep = self.prepare_data_frames
         for target in prep.output():
@@ -321,7 +323,17 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         return get_task_dir(self.__class__, self.task_id)
 
     def output(self):
-        return luigi.LocalTarget(self.task_dir)
+        """The ``_SUCCESS`` marker, written only once the run has finished.
+
+        A directory left behind by a run that was killed mid-way therefore no
+        longer counts as done. Use :attr:`task_dir` for the run directory.
+        """
+        return luigi.LocalTarget(get_success_marker_path(self.task_dir))
+
+    def complete(self) -> bool:
+        """Done when ``_SUCCESS`` exists (or for a finished run of an older version, see
+        :func:`~mars_rec.utils.files.is_complete_run`)."""
+        return is_complete_run(self.task_dir)
 
     @property
     def project_config(self) -> ProjectConfig:
@@ -619,6 +631,10 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             raise
         finally:
             gc.collect()
+
+        # Last step: from now on Luigi (and ``complete()``) treat the run as done.
+        with open(get_success_marker_path(self.task_dir), "w"):
+            pass
 
 
 class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
