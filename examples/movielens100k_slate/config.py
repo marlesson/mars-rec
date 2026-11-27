@@ -9,14 +9,20 @@ Two framework features in one project:
 - ``metadata_columns``: each item carries a 19-dim binary genre vector,
     looked up by item index at sample time.
 """
+
 from mars_rec.data.dataset import (
     InteractionsWithNegativeItemGenerationByAvailableItemsDataset,
 )
 from mars_rec.meta_config import (
-    ProjectConfig, Column, IOType, RecommenderType,
+    ProjectConfig,
+    Column,
+    IOType,
+    RecommenderType,
 )
 from examples.movielens100k_slate.data import (
-    BASE_DIR, PrepareML100KSlateDataFrame, GENRE_DIM,
+    BASE_DIR,
+    PrepareML100KSlateDataFrame,
+    GENRE_DIM,
 )
 
 movielens100k_slate = ProjectConfig(

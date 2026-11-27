@@ -9,6 +9,7 @@ with the contrastive / cosine family used by
 - ``HardNegInfoNCELoss`` — InfoNCE + per-query hard negatives.
 - ``ImplicitFeedbackBCELoss`` — confidence-weighted BCE.
 """
+
 from __future__ import annotations
 
 import math
@@ -32,6 +33,7 @@ def _normalised(t: torch.Tensor) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 # CosineSimilarityLoss
 # ---------------------------------------------------------------------------
+
 
 class TestCosineSimilarityLoss:
     def test_zero_when_predictions_equal_targets(self):
@@ -61,6 +63,7 @@ class TestCosineSimilarityLoss:
 # InfoNCELoss
 # ---------------------------------------------------------------------------
 
+
 class TestInfoNCELoss:
     def test_loss_is_lower_when_pairs_are_aligned(self):
         """When pred_emb == target_emb (diagonal similarity = 1, off-diag ~0),
@@ -68,9 +71,7 @@ class TestInfoNCELoss:
         torch.manual_seed(42)
         emb = _normalised(torch.randn(8, 16))
         aligned_loss = InfoNCELoss(temperature=0.1)(emb, emb).item()
-        misaligned_loss = InfoNCELoss(temperature=0.1)(
-            emb, _normalised(torch.randn(8, 16))
-        ).item()
+        misaligned_loss = InfoNCELoss(temperature=0.1)(emb, _normalised(torch.randn(8, 16))).item()
         assert aligned_loss < misaligned_loss
 
     def test_lower_temperature_sharpens_loss(self):
@@ -92,6 +93,7 @@ class TestInfoNCELoss:
 # ---------------------------------------------------------------------------
 # HardNegInfoNCELoss
 # ---------------------------------------------------------------------------
+
 
 class TestHardNegInfoNCELoss:
     def test_falls_back_to_infonce_when_hard_neg_is_none(self):
@@ -130,6 +132,7 @@ class TestHardNegInfoNCELoss:
 # ---------------------------------------------------------------------------
 # ImplicitFeedbackBCELoss
 # ---------------------------------------------------------------------------
+
 
 class TestImplicitFeedbackBCELoss:
     def test_confidence_targets_boost_loss(self):

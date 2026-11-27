@@ -1,4 +1,5 @@
 """Unit tests for ``mars_rec.filtering``."""
+
 from __future__ import annotations
 
 from typing import Dict
@@ -23,6 +24,7 @@ CATALOG = np.array([2, 3, 4, 5, 6, 7, 8, 9], dtype=np.int64)
 # FullCatalogProvider
 # ---------------------------------------------------------------------------
 
+
 class TestFullCatalogProvider:
     def test_returns_input_unchanged(self):
         p = FullCatalogProvider()
@@ -36,6 +38,7 @@ class TestFullCatalogProvider:
 # ---------------------------------------------------------------------------
 # AvailableItemsColumnProvider
 # ---------------------------------------------------------------------------
+
 
 class TestAvailableItemsColumnProvider:
     def test_reads_column(self):
@@ -59,6 +62,7 @@ class TestAvailableItemsColumnProvider:
 # ---------------------------------------------------------------------------
 # CandidateFilter stubs for CompositeProvider
 # ---------------------------------------------------------------------------
+
 
 class _EvenIdxFilter(CandidateFilter):
     """Keep even idx values."""
@@ -111,14 +115,17 @@ class TestCompositeProvider:
     def test_custom_fallback(self):
         custom = AvailableItemsColumnProvider("backup")
         p = CompositeProvider(
-            filters=[_AllFalse()], min_pool=1, fallback=custom,
+            filters=[_AllFalse()],
+            min_pool=1,
+            fallback=custom,
         )
         out = p.get_candidates({"backup": [99]}, CATALOG)
         np.testing.assert_array_equal(out, np.array([99], dtype=np.int64))
 
     def test_name_includes_filter_names(self):
         p = CompositeProvider(
-            filters=[_EvenIdxFilter(), _ThresholdFilter()], min_pool=0,
+            filters=[_EvenIdxFilter(), _ThresholdFilter()],
+            min_pool=0,
         )
         assert "_EvenIdxFilter" in p.name()
         assert "_ThresholdFilter" in p.name()
@@ -127,6 +134,7 @@ class TestCompositeProvider:
 # ---------------------------------------------------------------------------
 # resolve_candidate_provider — wiring through ProjectConfig
 # ---------------------------------------------------------------------------
+
 
 class _FakeProjectConfig:
     """Minimal stand-in exposing the two attributes resolve consults."""

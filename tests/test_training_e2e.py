@@ -12,6 +12,7 @@ evaluation → metadata — against a fixture project under
 
 Marked ``slow`` because a full epoch over the fixture takes ~50s on CPU.
 """
+
 from __future__ import annotations
 
 import json
@@ -83,8 +84,12 @@ class TestSupervisedTrainingFullLifecycle:
         out = Path(task.output().path)
         # The 6 artifacts ``inference.load_trained_model`` + the registry need.
         for name in (
-            "params.json", "index_mapping.pkl", "history.csv",
-            "metadata.json", "summary.txt", "weights.ckpt",
+            "params.json",
+            "index_mapping.pkl",
+            "history.csv",
+            "metadata.json",
+            "summary.txt",
+            "weights.ckpt",
             # Architecture SVG is always emitted with trace=True (Round 2 viz refactor).
             "architecture.svg",
         ):
@@ -125,23 +130,15 @@ class TestSupervisedTrainingFullLifecycle:
         # exist as keys with the expected indices. (np.nan-as-dict-key cannot
         # be looked up directly because nan != nan; we check via iteration.)
         import math
+
         assert idx["item_id"].get("-1") == 2
         assert idx["item_id"].get(None) == 1
         # Iterate keys to confirm a NaN entry exists and maps to 1.
-        nan_values = [
-            v for k, v in idx["item_id"].items()
-            if isinstance(k, float) and math.isnan(k)
-        ]
-        assert nan_values == [1], (
-            f"expected single nan→1 entry, got {nan_values}"
-        )
+        nan_values = [v for k, v in idx["item_id"].items() if isinstance(k, float) and math.isnan(k)]
+        assert nan_values == [1], f"expected single nan→1 entry, got {nan_values}"
 
         # Real items in the fixture all start with "i" — they must NOT
         # collide with the reserved slots (0=OOV, 1=NaN, 2=-1/PAD).
-        real_values = [v for k, v in idx["item_id"].items()
-                       if isinstance(k, str) and k.startswith("i")]
+        real_values = [v for k, v in idx["item_id"].items() if isinstance(k, str) and k.startswith("i")]
         assert real_values, "no real items in index_mapping — fixture broken"
-        assert all(v >= 3 for v in real_values), (
-            f"real items collided with reserved indices: "
-            f"{sorted(real_values)[:5]}"
-        )
+        assert all(v >= 3 for v in real_values), f"real items collided with reserved indices: {sorted(real_values)[:5]}"

@@ -5,13 +5,12 @@ under ``examples/`` define their own download tasks instead. Kept
 here for backward compatibility with any project still pointing at
 the public ``mars-gym-dataset`` Cloud Storage bucket.
 """
+
 import abc
 import luigi
 
 import pandas as pd
-import numpy as np
 import os
-from mars_rec.data.task import BasePrepareDataFrames
 import requests
 from tqdm import tqdm
 import math
@@ -19,12 +18,8 @@ from mars_rec.utils import files
 
 DATASETS = dict(
     random=["https://storage.googleapis.com/mars-gym-dataset/raw/random/dataset.csv"],
-    yoochoose=[
-        "https://storage.googleapis.com/mars-gym-dataset/raw/yoochoose/yoochoose-buys.dat"
-    ],
-    processed_yoochoose=[
-        "https://storage.googleapis.com/mars-gym-dataset/process/yoochoose/dataset.csv"
-    ],
+    yoochoose=["https://storage.googleapis.com/mars-gym-dataset/raw/yoochoose/yoochoose-buys.dat"],
+    processed_yoochoose=["https://storage.googleapis.com/mars-gym-dataset/process/yoochoose/dataset.csv"],
     trivago_rio=[
         "https://storage.googleapis.com/mars-gym-dataset/raw/trivago/rio/train.csv",
         "https://storage.googleapis.com/mars-gym-dataset/raw/trivago/rio/item_metadata.csv",
@@ -85,9 +80,7 @@ class DownloadDataset(luigi.Task, metaclass=abc.ABCMeta):
     def output(self):
         """One ``LocalTarget`` per file declared in :data:`DATASETS`."""
         return [
-            luigi.LocalTarget(
-                os.path.join(self.output_path, self.dataset, os.path.basename(p))
-            )
+            luigi.LocalTarget(os.path.join(self.output_path, self.dataset, os.path.basename(p)))
             for p in DATASETS[self.dataset]
         ]
 

@@ -9,12 +9,12 @@ Dataset: https://grouplens.org/datasets/movielens/1m/
 - Ratings: 1-5 (converted to implicit: rating >= 4 -> positive)
 - Features: user gender, age group, occupation; movie genres
 """
+
 import os
 import zipfile
 from typing import Optional
 
 import luigi
-import numpy as np
 import pandas as pd
 
 from mars_rec.data.task import BasePrepareDataFrames
@@ -31,10 +31,24 @@ GENDER_MAP = {"F": 0, "M": 1}
 
 # Top genres for multi-hot encoding
 TOP_GENRES = [
-    "Action", "Adventure", "Animation", "Children's", "Comedy",
-    "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir",
-    "Horror", "Musical", "Mystery", "Romance", "Sci-Fi",
-    "Thriller", "War", "Western",
+    "Action",
+    "Adventure",
+    "Animation",
+    "Children's",
+    "Comedy",
+    "Crime",
+    "Documentary",
+    "Drama",
+    "Fantasy",
+    "Film-Noir",
+    "Horror",
+    "Musical",
+    "Mystery",
+    "Romance",
+    "Sci-Fi",
+    "Thriller",
+    "War",
+    "Western",
 ]
 
 
@@ -117,15 +131,15 @@ class DownloadAndPrepareMovieLens(luigi.Task):
 
         # --- Movie features: multi-hot genre encoding ---
         for genre in TOP_GENRES:
-            movies[genre_col_name(genre)] = (
-                movies["genres"].str.contains(genre, regex=False).astype(float)
-            )
+            movies[genre_col_name(genre)] = movies["genres"].str.contains(genre, regex=False).astype(float)
 
         # --- Merge ---
-        df = ratings.merge(users[["user_id", "gender_encoded", "age_encoded", "occupation_norm"]],
-                           on="user_id", how="left")
-        df = df.merge(movies[["movie_id"] + [c for c in movies.columns if c.startswith("genre_")]],
-                       on="movie_id", how="left")
+        df = ratings.merge(
+            users[["user_id", "gender_encoded", "age_encoded", "occupation_norm"]], on="user_id", how="left"
+        )
+        df = df.merge(
+            movies[["movie_id"] + [c for c in movies.columns if c.startswith("genre_")]], on="movie_id", how="left"
+        )
 
         # --- Implicit feedback: rating >= 4 is positive ---
         df["label"] = (df["rating"] >= 4).astype(float)
@@ -136,8 +150,9 @@ class DownloadAndPrepareMovieLens(luigi.Task):
         # Select final columns
         genre_cols = [c for c in df.columns if c.startswith("genre_")]
         result = df[
-            ["user_id", "movie_id", "gender_encoded", "age_encoded",
-             "occupation_norm", "timestamp"] + genre_cols + ["label"]
+            ["user_id", "movie_id", "gender_encoded", "age_encoded", "occupation_norm", "timestamp"]
+            + genre_cols
+            + ["label"]
         ]
 
         result.to_csv(self.output().path, index=False)
@@ -145,8 +160,10 @@ class DownloadAndPrepareMovieLens(luigi.Task):
         print(f"  Users: {result['user_id'].nunique()}")
         print(f"  Movies: {result['movie_id'].nunique()}")
         print(f"  Positive rate (rating>=4): {result['label'].mean():.2%}")
-        print(f"  Date range: {pd.to_datetime(result['timestamp'].min(), unit='s').date()} "
-              f"to {pd.to_datetime(result['timestamp'].max(), unit='s').date()}")
+        print(
+            f"  Date range: {pd.to_datetime(result['timestamp'].min(), unit='s').date()} "
+            f"to {pd.to_datetime(result['timestamp'].max(), unit='s').date()}"
+        )
 
 
 class PrepareMovieLensDataFrame(BasePrepareDataFrames):
@@ -176,8 +193,7 @@ class PrepareMovieLensDataFrame(BasePrepareDataFrames):
         return df
 
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
-        float_cols = [c for c in df.columns
-                      if c not in ("user_id", "movie_id", "timestamp")]
+        float_cols = [c for c in df.columns if c not in ("user_id", "movie_id", "timestamp")]
         for col in float_cols:
             df[col] = df[col].astype(float)
         return df

@@ -11,6 +11,7 @@ Dataset: https://snap.stanford.edu/data/web-Amazon.html
 - ~198K reviews of ~12K beauty products (5-core: each user/item has >=5)
 - Fields used: reviewerID (user), asin (item), summary, overall (rating)
 """
+
 import gzip
 import json
 import os
@@ -28,10 +29,7 @@ OUTPUT_PATH: str = os.environ.get("OUTPUT_PATH", "output")
 BASE_DIR: str = os.path.join(OUTPUT_PATH, "amazon_beauty")
 DATASET_DIR: str = os.path.join(BASE_DIR, "dataset")
 
-REVIEWS_URL = (
-    "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/"
-    "reviews_Beauty_5.json.gz"
-)
+REVIEWS_URL = "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Beauty_5.json.gz"
 
 TEXT_EMB_DIM: int = 64
 MIN_USER_REVIEWS: int = 5
@@ -115,16 +113,17 @@ class DownloadAndPrepareAmazonBeauty(luigi.Task):
 
         print(f"Fitting TF-IDF + SVD({TEXT_EMB_DIM}) over {len(item_text)} item documents...")
         vec = TfidfVectorizer(
-            max_features=20_000, stop_words="english", ngram_range=(1, 2),
-            min_df=3, max_df=0.9,
+            max_features=20_000,
+            stop_words="english",
+            ngram_range=(1, 2),
+            min_df=3,
+            max_df=0.9,
         )
         tfidf = vec.fit_transform(item_text["text"].values)
         svd = TruncatedSVD(n_components=TEXT_EMB_DIM, random_state=42)
         emb = svd.fit_transform(tfidf).astype(np.float32)
 
-        item_text["item_text_emb"] = [
-            "[" + ", ".join(f"{x:.5f}" for x in row) + "]" for row in emb
-        ]
+        item_text["item_text_emb"] = ["[" + ", ".join(f"{x:.5f}" for x in row) + "]" for row in emb]
         metadata = item_text[["asin", "item_text_emb"]].rename(
             columns={"asin": "item_id"},
         )

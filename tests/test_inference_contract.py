@@ -6,6 +6,7 @@ runs preprocessing transforms identical to training, and returns top-k
 predictions. Each step has had a silent regression at least once in
 the project history — these tests pin them down.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,6 +33,7 @@ from mars_rec.model.base_model import LogisticRegression
 # ---------------------------------------------------------------------------
 # A minimal project that the inference module can resolve via load_attr
 # ---------------------------------------------------------------------------
+
 
 class _InfPrepTask(BasePrepareDataFrames):
     """Concrete BasePrepareDataFrames stub so inference can call
@@ -89,18 +91,15 @@ def _write_task_artifacts(
         # Lightning checkpoint format: {"state_dict": {...}}
         # Keys are prefixed with "module." because the model is wrapped
         # inside a RecommenderLightningModule (self.module = recommender).
-        prefixed_sd = {
-            state_dict_prefix + k: v for k, v in model.state_dict().items()
-        }
-        torch.save(
-            {"state_dict": prefixed_sd}, task_dir / "weights_epoch=00.ckpt"
-        )
+        prefixed_sd = {state_dict_prefix + k: v for k, v in model.state_dict().items()}
+        torch.save({"state_dict": prefixed_sd}, task_dir / "weights_epoch=00.ckpt")
     return idx_mapping
 
 
 # ---------------------------------------------------------------------------
 # load_trained_model
 # ---------------------------------------------------------------------------
+
 
 class TestLoadTrainedModel:
     def test_returns_tuple_with_expected_types(self, tmp_path):
@@ -113,9 +112,7 @@ class TestLoadTrainedModel:
         model = LogisticRegression(inference_test_config, idx, n_factors=4)
         _write_task_artifacts(tmp_path, model)
 
-        loaded_model, project_config, index_mapping, params = load_trained_model(
-            str(tmp_path)
-        )
+        loaded_model, project_config, index_mapping, params = load_trained_model(str(tmp_path))
 
         assert isinstance(loaded_model, torch.nn.Module)
         assert isinstance(project_config, ProjectConfig)
@@ -146,7 +143,8 @@ class TestLoadTrainedModel:
             torch.full_like(loaded_model.user_embeddings.weight, 0.42),
         )
         assert torch.allclose(
-            loaded_model.linear.bias, torch.tensor([0.7]),
+            loaded_model.linear.bias,
+            torch.tensor([0.7]),
         )
 
     def test_raises_when_no_checkpoint_present(self, tmp_path):
@@ -164,6 +162,7 @@ class TestLoadTrainedModel:
 # ---------------------------------------------------------------------------
 # preprocess_raw_data
 # ---------------------------------------------------------------------------
+
 
 class TestPreprocessRawData:
     def test_creates_synthetic_output_column_when_missing(self):
@@ -188,9 +187,7 @@ class TestPreprocessRawData:
             "user_id": defaultdict(int, {"u1": 3}),
             "item_id": defaultdict(int, {"i1": 3}),
         }
-        df_raw = pd.DataFrame(
-            {"user_id": ["u1"], "item_id": ["i1"], "label": [0.8]}
-        )
+        df_raw = pd.DataFrame({"user_id": ["u1"], "item_id": ["i1"], "label": [0.8]})
         df_out, _ = preprocess_raw_data(df_raw, inference_test_config, idx)
         # Existing label preserved.
         assert df_out["label"].iloc[0] == pytest.approx(0.8)
@@ -218,11 +215,13 @@ class TestPreprocessRawData:
 # predict_top_k
 # ---------------------------------------------------------------------------
 
+
 class TestPredictTopK:
     def test_shape_matches_dataset_size_and_k(self):
         """Build a deterministic dataset + model, run ``predict_top_k`` and
         check the output shape contract: ``[N, k]`` for both indices and
         scores."""
+
         # We use a fake module that returns logits of shape [B, C] and a
         # synthetic dataset producing tensor batches.
         class _StubDS:
@@ -282,13 +281,12 @@ class TestPredictTopK:
 # build_reverse_item_mapping
 # ---------------------------------------------------------------------------
 
+
 class TestBuildReverseItemMapping:
     def test_skips_reserved_indices(self):
         """OOV (0) and PAD (1) must NOT appear in the reverse map — the
         downstream consumer treats them as "no prediction"."""
-        idx_mapping = {
-            "item_id": {"oov_marker": 0, np.nan: 1, "-1": 2, "real": 3, "real2": 4}
-        }
+        idx_mapping = {"item_id": {"oov_marker": 0, np.nan: 1, "-1": 2, "real": 3, "real2": 4}}
         rev = build_reverse_item_mapping(idx_mapping, "item_id")
         # Per inference.py:294, idx <= 1 is skipped; idx 2 (PAD/-1) IS kept.
         assert 0 not in rev

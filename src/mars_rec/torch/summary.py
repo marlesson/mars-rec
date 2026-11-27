@@ -4,9 +4,9 @@ Called by :class:`SupervisedModelTraining` after model construction
 to write the per-layer parameter / shape table into ``summary.txt``
 under the run's output directory.
 """
+
 import numpy as np
 import torch
-import torch.nn as nn
 from collections import OrderedDict
 
 
@@ -80,9 +80,7 @@ def summary(model, x, *args, **kwargs):
     model.eval()
     with torch.no_grad():
         input_params = x if isinstance(x, list) or isinstance(x, tuple) else [x]
-        model(*input_params) if not (kwargs or args) else model(
-            *input_params, *args, **kwargs
-        )
+        model(*input_params) if not (kwargs or args) else model(*input_params, *args, **kwargs)
 
     for hook in hooks:
         hook.remove()
@@ -95,10 +93,15 @@ def summary(model, x, *args, **kwargs):
     width = 24 + 1 + 20 + 1 + 20 + 1 + 14 + 1 + 14  # 96
 
     print("=" * width)
-    print(header_fmt.format(
-        "Layer", "Kernel Shape", "Output Shape",
-        "# Params (K)", "# Mult-Adds (M)",
-    ))
+    print(
+        header_fmt.format(
+            "Layer",
+            "Kernel Shape",
+            "Output Shape",
+            "# Params (K)",
+            "# Mult-Adds (M)",
+        )
+    )
     print("-" * width)
 
     total_params, total_macs = 0, 0

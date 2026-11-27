@@ -168,12 +168,14 @@ class TestTransformWithIndexing:
             other_input_columns=[array_col],
             output_column=Column("clicked", IOType.NUMBER),
         )
-        df = pd.DataFrame({
-            "user_id": ["1"],
-            "item_id": ["10"],
-            "tags": [["a", "b"]],
-            "clicked": [1],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": ["1"],
+                "item_id": ["10"],
+                "tags": [["a", "b"]],
+                "clicked": [1],
+            }
+        )
         index_mapping = {
             "user_id": defaultdict(int, {"1": 1}),
             "item_id": defaultdict(int, {"10": 10}),
@@ -212,11 +214,13 @@ class TestTransformWithIndexing:
         assert df["item_id"].iloc[0] == 5
 
     def test_multiple_rows_indexable(self, project_config):
-        df = pd.DataFrame({
-            "user_id": ["1", "2", "1", "3"],
-            "item_id": ["10", "20", "30", "10"],
-            "clicked": [1, 0, 1, 0],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": ["1", "2", "1", "3"],
+                "item_id": ["10", "20", "30", "10"],
+                "clicked": [1, 0, 1, 0],
+            }
+        )
         index_mapping = {
             "user_id": defaultdict(int, {"1": 1, "2": 2, "3": 3}),
             "item_id": defaultdict(int, {"10": 10, "20": 20, "30": 30}),
@@ -238,12 +242,14 @@ class TestTransformWithIndexing:
             other_input_columns=[array_col],
             output_column=Column("clicked", IOType.NUMBER),
         )
-        df = pd.DataFrame({
-            "user_id": ["1", "2"],
-            "item_id": ["10", "20"],
-            "tags": [["a", "b"], ["c", "a"]],
-            "clicked": [1, 0],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": ["1", "2"],
+                "item_id": ["10", "20"],
+                "tags": [["a", "b"], ["c", "a"]],
+                "clicked": [1, 0],
+            }
+        )
         index_mapping = {
             "user_id": defaultdict(int, {"1": 1, "2": 2}),
             "item_id": defaultdict(int, {"10": 10, "20": 20}),
@@ -284,7 +290,13 @@ class TestTransformWithIndexing:
         assert df["clicked"].iloc[0] == 0.75
 
     def test_empty_df(self, project_config):
-        df = pd.DataFrame({"user_id": pd.Series([], dtype=str), "item_id": pd.Series([], dtype=str), "clicked": pd.Series([], dtype=float)})
+        df = pd.DataFrame(
+            {
+                "user_id": pd.Series([], dtype=str),
+                "item_id": pd.Series([], dtype=str),
+                "clicked": pd.Series([], dtype=float),
+            }
+        )
         index_mapping = {
             "user_id": defaultdict(int, {"1": 1}),
             "item_id": defaultdict(int, {"10": 10}),

@@ -1,14 +1,12 @@
 """Baseline recommender models shipped with the framework."""
-from typing import Tuple, Callable, Union, Type, List, Dict, Any
-from itertools import combinations
+
+from typing import Callable, Dict, Any
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from mars_rec.torch.init import lecun_normal_init
 from mars_rec.model.abstract import RecommenderModule
-import numpy as np
-from mars_rec.meta_config import ProjectConfig, IOType, Column
+from mars_rec.meta_config import ProjectConfig
 
 
 class LogisticRegression(RecommenderModule):
@@ -45,7 +43,7 @@ class LogisticRegression(RecommenderModule):
 
     def init_weights(self, module: nn.Module):
         """Apply ``self.weight_init`` to every ``nn.Linear``'s weight + bias."""
-        if type(module) == nn.Linear:
+        if type(module) is nn.Linear:
             self.weight_init(module.weight)
             module.bias.data.fill_(0.1)
 

@@ -5,6 +5,7 @@ Every callable registered in :data:`METRIC_REGISTRY` takes
 training task picks them by string name via the ``metrics`` Luigi
 parameter (e.g. ``["loss", "binary_accuracy", "f1_score"]``).
 """
+
 from typing import Sequence
 
 import torch
@@ -29,14 +30,14 @@ def bce(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
     # FP32 so this metric works under ``precision="16-mixed"``.
     with torch.autocast(device_type=y_pred.device.type, enabled=False):
         loss = F.binary_cross_entropy(
-            y_pred.float(), y_true.float(), reduction="none",
+            y_pred.float(),
+            y_true.float(),
+            reduction="none",
         )
     return loss.mean()
 
 
-def binary_accuracy(
-    y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float = 0.5
-) -> torch.Tensor:
+def binary_accuracy(y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
     """Fraction of rows where ``y_pred > threshold`` agrees with ``y_true > threshold``."""
     y_pred, y_true = _preprocess(y_pred, y_true)
     y_pred = (y_pred.float() > threshold).long()
@@ -44,9 +45,7 @@ def binary_accuracy(
     return torch.eq(y_pred, y_true).view(-1).float().mean()
 
 
-def precision(
-    y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float = 0.5
-) -> torch.Tensor:
+def precision(y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
     """Binary precision ``tp / (tp + fp)`` thresholded at ``threshold``."""
     y_pred, y_true = _preprocess(y_pred, y_true)
     y_pred = (y_pred.float() > threshold).float()
@@ -59,9 +58,7 @@ def precision(
     return tp / (tp + fp + epsilon)
 
 
-def recall(
-    y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float = 0.5
-) -> torch.Tensor:
+def recall(y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
     """Binary recall ``tp / (tp + fn)`` thresholded at ``threshold``."""
     y_pred, y_true = _preprocess(y_pred, y_true)
     y_pred = (y_pred.float() > threshold).float()
@@ -74,9 +71,7 @@ def recall(
     return tp / (tp + fn + epsilon)
 
 
-def f1_score(
-    y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float = 0.5
-) -> torch.Tensor:
+def f1_score(y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
     """Binary F1 score (harmonic mean of :func:`precision` and :func:`recall`)."""
     y_pred, y_true = _preprocess(y_pred, y_true)
     y_pred = (y_pred.float() > threshold).float()
@@ -118,14 +113,13 @@ def rmse(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
 # Multi-class / ranking metrics (work with logits [B, C] + targets [B])
 # ---------------------------------------------------------------------------
 
+
 def _is_multiclass(y_pred: torch.Tensor) -> bool:
     """Check if predictions are multi-class logits (2D with C > 1)."""
     return y_pred.dim() == 2 and y_pred.size(1) > 1
 
 
-def top_k_accuracy(
-    y_pred: torch.Tensor, y_true: torch.Tensor, k: int = 10
-) -> torch.Tensor:
+def top_k_accuracy(y_pred: torch.Tensor, y_true: torch.Tensor, k: int = 10) -> torch.Tensor:
     """Top-k accuracy for multi-class logits [B, C] and targets [B].
 
     Returns the fraction of samples where the ground-truth class
@@ -179,9 +173,7 @@ def top_20_accuracy(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
     return top_k_accuracy(y_pred, y_true, k=20)
 
 
-def ndcg_at_k(
-    y_pred: torch.Tensor, y_true: torch.Tensor, k: int = 10
-) -> torch.Tensor:
+def ndcg_at_k(y_pred: torch.Tensor, y_true: torch.Tensor, k: int = 10) -> torch.Tensor:
     """NDCG@k for multi-class logits [B, C] and single-relevant-item targets [B].
 
     For each sample, checks where the ground-truth item ranks in the top-k
@@ -197,7 +189,7 @@ def ndcg_at_k(
     k = min(k, y_pred.size(1))
     _, topk_indices = y_pred.topk(k, dim=1)
     targets = y_true.long().unsqueeze(1).expand_as(topk_indices)
-    hits = (topk_indices == targets)  # [B, k]
+    hits = topk_indices == targets  # [B, k]
     # positions are 1-indexed: first position = 1
     positions = torch.arange(1, k + 1, device=y_pred.device, dtype=torch.float32)
     dcg = (hits.float() / torch.log2(positions + 1)).sum(dim=1)  # [B]
@@ -219,9 +211,7 @@ def ndcg_at_20(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
     return ndcg_at_k(y_pred, y_true, k=20)
 
 
-def mrr_at_k(
-    y_pred: torch.Tensor, y_true: torch.Tensor, k: int = 10
-) -> torch.Tensor:
+def mrr_at_k(y_pred: torch.Tensor, y_true: torch.Tensor, k: int = 10) -> torch.Tensor:
     """MRR@k for multi-class logits [B, C] and single-relevant-item targets [B].
 
     Mean Reciprocal Rank: 1/rank of the first (only) relevant item in top-k.
@@ -236,7 +226,7 @@ def mrr_at_k(
     k = min(k, y_pred.size(1))
     _, topk_indices = y_pred.topk(k, dim=1)
     targets = y_true.long().unsqueeze(1).expand_as(topk_indices)
-    hits = (topk_indices == targets)  # [B, k]
+    hits = topk_indices == targets  # [B, k]
     positions = torch.arange(1, k + 1, device=y_pred.device, dtype=torch.float32)
     rr = (hits.float() / positions).sum(dim=1)  # [B] — at most one hit
     return rr.mean()

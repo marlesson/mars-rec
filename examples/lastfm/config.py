@@ -1,9 +1,13 @@
 """
 Project configuration for Last.fm sequential next-item recommendation.
 """
+
 from mars_rec.data.dataset import InteractionsWithNegativeItemGenerationDataset
 from mars_rec.meta_config import (
-    ProjectConfig, Column, IOType, RecommenderType,
+    ProjectConfig,
+    Column,
+    IOType,
+    RecommenderType,
 )
 from examples.lastfm.data import BASE_DIR, PrepareLastFMDataFrame, HISTORY_LEN
 

@@ -10,6 +10,7 @@ synthetic dataset (60 rows, 5 users × 12 items, binary label) is large
 enough to split 60 / 20 / 20 across train/val/test, and small enough
 for a 2-epoch LogisticRegression run to finish in ~5 seconds on CPU.
 """
+
 from __future__ import annotations
 
 import os
@@ -44,11 +45,13 @@ class DummyPrep(BasePrepareDataFrames):
         rows = []
         for u in range(5):
             for i in range(12):
-                rows.append({
-                    "user_id": f"u{u}",
-                    "item_id": f"i{i}",
-                    "label": float((u + i) % 2),
-                })
+                rows.append(
+                    {
+                        "user_id": f"u{u}",
+                        "item_id": f"i{i}",
+                        "label": float((u + i) % 2),
+                    }
+                )
         return pd.DataFrame(rows)
 
 

@@ -6,6 +6,7 @@ Every model class referenced via the
 with ``project_config`` and ``index_mapping``, plus any keyword
 arguments passed through ``recommender_extra_params``.
 """
+
 import abc
 from typing import Dict, Any
 
@@ -43,7 +44,9 @@ class RecommenderModule(nn.Module, metaclass=abc.ABCMeta):
     """
 
     def __init__(
-        self, project_config: ProjectConfig, index_mapping: Dict[str, Dict[Any, int]],
+        self,
+        project_config: ProjectConfig,
+        index_mapping: Dict[str, Dict[Any, int]],
     ) -> None:
         super().__init__()
         self._index_mapping = index_mapping

@@ -1,6 +1,7 @@
 """
 Neural network models for MovieLens 1M recommendation.
 """
+
 from typing import Any, Dict
 
 import torch
@@ -49,12 +50,14 @@ class MovieLensNCF(RecommenderModule):
         layers = []
         in_size = mlp_input
         for i in range(n_layers):
-            out_size = hidden_size // (2 ** i)
-            layers.extend([
-                nn.Linear(in_size, out_size),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-            ])
+            out_size = hidden_size // (2**i)
+            layers.extend(
+                [
+                    nn.Linear(in_size, out_size),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                ]
+            )
             in_size = out_size
         self.mlp = nn.Sequential(*layers)
 

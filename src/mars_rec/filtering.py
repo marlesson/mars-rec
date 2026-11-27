@@ -16,6 +16,7 @@ mirrors what will be submitted.
 Default behaviour: when no provider is configured, every consumer keeps its
 legacy code path, so adding this module is a strictly opt-in change.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

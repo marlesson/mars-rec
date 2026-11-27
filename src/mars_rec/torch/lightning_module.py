@@ -14,6 +14,7 @@ The training task picks the right wrapper automatically based on the
 configured ``loss_function`` (see ``_EMBEDDING_LOSSES`` in
 :mod:`mars_rec.simulation.training`).
 """
+
 from typing import Optional
 
 import torch
@@ -26,8 +27,12 @@ from mars_rec.torch.metrics import METRIC_REGISTRY
 
 
 _LOGIT_LOSSES = {
-    "bce_logits", "bce_logits_smooth", "bpr", "focal_loss",
-    "ranknet", "lambdarank",
+    "bce_logits",
+    "bce_logits_smooth",
+    "bpr",
+    "focal_loss",
+    "ranknet",
+    "lambdarank",
 }
 
 
@@ -90,9 +95,11 @@ class RecommenderLightningModule(pl.LightningModule):
                 if stage == "train":
                     loss = loss + aux_lambda * aux
                 self.log(
-                    f"val_aux_loss" if stage == "val" else "aux_loss",
+                    "val_aux_loss" if stage == "val" else "aux_loss",
                     aux.detach(),
-                    prog_bar=False, on_step=False, on_epoch=True,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
                 )
 
         # Log loss
@@ -120,23 +127,26 @@ class RecommenderLightningModule(pl.LightningModule):
         if not RecommenderLightningModule._step_logged:
             RecommenderLightningModule._step_logged = True
             inputs, targets = batch
-            shapes = [getattr(x, 'shape', '?') for x in (inputs if isinstance(inputs, (list, tuple)) else [inputs])]
+            shapes = [getattr(x, "shape", "?") for x in (inputs if isinstance(inputs, (list, tuple)) else [inputs])]
             # Targets may be a tensor (labels) or a list/tuple (e.g. DNS
             # returns ``(labels, hard_negatives)``). Be defensive — the diag
             # is informational and must never crash the step.
             if isinstance(targets, (list, tuple)):
-                target_shape = [getattr(t, 'shape', '?') for t in targets]
+                target_shape = [getattr(t, "shape", "?") for t in targets]
             else:
-                target_shape = getattr(targets, 'shape', '?')
+                target_shape = getattr(targets, "shape", "?")
             print(
-                f"[DIAG] training_step batch_idx=0 input_shapes={shapes} "
-                f"target_shape={target_shape}",
+                f"[DIAG] training_step batch_idx=0 input_shapes={shapes} target_shape={target_shape}",
                 flush=True,
             )
         return self._shared_step(batch, "train")
 
     def on_train_epoch_end(self):
-        metrics = {k: f"{v:.4f}" for k, v in self.trainer.callback_metrics.items() if isinstance(v, (int, float)) or hasattr(v, 'item')}
+        metrics = {
+            k: f"{v:.4f}"
+            for k, v in self.trainer.callback_metrics.items()
+            if isinstance(v, (int, float)) or hasattr(v, "item")
+        }
         print(f"[EPOCH] {self.current_epoch} metrics={metrics}", flush=True)
 
     def validation_step(self, batch, batch_idx):

@@ -9,6 +9,7 @@ tests verify the public contract:
 - For the same input, RAdam produces a different trajectory than vanilla
   Adam (rectification kicks in vs. Adam's plain bias correction).
 """
+
 from __future__ import annotations
 
 import warnings
@@ -29,6 +30,7 @@ pytestmark = pytest.mark.filterwarnings("ignore::UserWarning")
 # Construction
 # ---------------------------------------------------------------------------
 
+
 class TestRAdamConstruction:
     def test_invalid_lr_raises(self):
         m = nn.Linear(4, 1)
@@ -48,10 +50,12 @@ class TestRAdamConstruction:
     def test_two_param_groups_preserved(self):
         m1 = nn.Linear(4, 2)
         m2 = nn.Linear(2, 1)
-        opt = RAdam([
-            {"params": m1.parameters(), "lr": 1e-2},
-            {"params": m2.parameters(), "lr": 1e-3},
-        ])
+        opt = RAdam(
+            [
+                {"params": m1.parameters(), "lr": 1e-2},
+                {"params": m2.parameters(), "lr": 1e-3},
+            ]
+        )
         assert len(opt.param_groups) == 2
         assert opt.param_groups[0]["lr"] == 1e-2
         assert opt.param_groups[1]["lr"] == 1e-3
@@ -60,6 +64,7 @@ class TestRAdamConstruction:
 # ---------------------------------------------------------------------------
 # Behaviour
 # ---------------------------------------------------------------------------
+
 
 class TestRAdamStep:
     def test_step_updates_parameters(self):

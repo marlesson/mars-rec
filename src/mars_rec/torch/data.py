@@ -6,6 +6,7 @@ PyTorch's default per-sample collation step entirely — the wrapped
 :class:`InteractionsDataset` already returns whole-batch numpy arrays,
 so collation would otherwise re-do work the Dataset has already done.
 """
+
 from typing import List, Optional
 
 import torch
@@ -68,7 +69,9 @@ class FasterBatchSampler(Sampler):
             # Weighted sampling with replacement — same row count per epoch
             # so the trainer sees a consistent number of batches.
             iter_list: List[int] = torch.multinomial(
-                self.sample_weights, self.num_samples, replacement=True,
+                self.sample_weights,
+                self.num_samples,
+                replacement=True,
             ).tolist()
         elif self.shuffle:
             iter_list = torch.randperm(self.num_samples).tolist()

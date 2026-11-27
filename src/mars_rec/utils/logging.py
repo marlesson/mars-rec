@@ -12,6 +12,7 @@ Exposes:
 - ``get_logger`` is just a thin re-export of ``logging.getLogger`` for
   callers that want to avoid importing both modules.
 """
+
 from __future__ import annotations
 
 import logging

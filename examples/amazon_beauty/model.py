@@ -10,9 +10,9 @@ text embedding. That choice is deliberate: it lets the model generalise
 to cold items (any new product with a text description) while still
 modelling stable user preferences.
 """
+
 from typing import Any, Dict
 
-import torch
 import torch.nn as nn
 
 from mars_rec.meta_config import ProjectConfig

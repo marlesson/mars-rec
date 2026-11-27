@@ -6,6 +6,7 @@ parquet read → preprocess → predict_top_k → reverse map → result.json
 — plus the lower-level scoring helpers ``_collect_logits_and_targets``
 and ``score_candidates_bce``.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ from mars_rec.model.base_model import LogisticRegression
 # ---------------------------------------------------------------------------
 # Fixture project — must be importable via dotted path
 # ---------------------------------------------------------------------------
+
 
 class _E2EPrep(BasePrepareDataFrames):
     @property
@@ -68,9 +70,7 @@ def _stage_task_dir(task_dir, n_factors: int = 4):
 
     params = {
         "project": __name__ + ".e2e_config",
-        "recommender_module_class": (
-            "mars_rec.model.base_model.LogisticRegression"
-        ),
+        "recommender_module_class": ("mars_rec.model.base_model.LogisticRegression"),
         "recommender_extra_params": {"n_factors": n_factors},
     }
     with open(task_dir / "params.json", "w") as f:
@@ -86,6 +86,7 @@ def _stage_task_dir(task_dir, n_factors: int = 4):
 # run_inference — full orchestrator
 # ---------------------------------------------------------------------------
 
+
 class TestRunInferenceOrchestrator:
     def test_writes_result_json_with_expected_schema(self, tmp_path):
         task_dir = tmp_path / "task"
@@ -93,10 +94,12 @@ class TestRunInferenceOrchestrator:
         _stage_task_dir(task_dir)
 
         # Raw input: 3 rows, no label column (typical for blind test sets).
-        df = pd.DataFrame({
-            "user_id": ["u1", "u2", "u3"],
-            "item_id": ["i1", "i2", "i3"],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": ["u1", "u2", "u3"],
+                "item_id": ["i1", "i2", "i3"],
+            }
+        )
         data_path = tmp_path / "inputs.parquet"
         df.to_parquet(data_path)
 
@@ -125,10 +128,12 @@ class TestRunInferenceOrchestrator:
         task_dir.mkdir()
         _stage_task_dir(task_dir)
 
-        df = pd.DataFrame({
-            "user_id": ["u1", "u2"],
-            "item_id": ["i1", "i2"],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": ["u1", "u2"],
+                "item_id": ["i1", "i2"],
+            }
+        )
         data_path = tmp_path / "inputs.csv"
         df.to_csv(data_path, index=False)
 
@@ -136,7 +141,9 @@ class TestRunInferenceOrchestrator:
             task_dir=str(task_dir),
             data_path=str(data_path),
             output_path=str(tmp_path / "out.json"),
-            batch_size=2, k=3, device="cpu",
+            batch_size=2,
+            k=3,
+            device="cpu",
         )
         assert len(result["user"]) == 2
 
@@ -144,6 +151,7 @@ class TestRunInferenceOrchestrator:
 # ---------------------------------------------------------------------------
 # _collect_logits_and_targets
 # ---------------------------------------------------------------------------
+
 
 class TestCollectLogitsAndTargets:
     def test_shapes_match_dataset_size(self, tmp_path):
@@ -158,20 +166,27 @@ class TestCollectLogitsAndTargets:
         )
         from mars_rec.utils.index_mapping import transform_with_indexing
 
-        df = pd.DataFrame({
-            "user_id": ["u1", "u2", "u3", "u1"],
-            "item_id": ["i1", "i2", "i3", "i4"],
-            "label": [1.0, 0.0, 1.0, 0.0],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": ["u1", "u2", "u3", "u1"],
+                "item_id": ["i1", "i2", "i3", "i4"],
+                "label": [1.0, 0.0, 1.0, 0.0],
+            }
+        )
         df = preprocess_interactions_data_frame(df, e2e_config)
         transform_with_indexing(df, idx, e2e_config)
         ds = InteractionsDataset(
-            data_frame=df, embeddings_for_metadata=None,
-            project_config=e2e_config, index_mapping=idx,
+            data_frame=df,
+            embeddings_for_metadata=None,
+            project_config=e2e_config,
+            index_mapping=idx,
         )
 
         logits, targets = _collect_logits_and_targets(
-            model, ds, batch_size=2, device="cpu",
+            model,
+            ds,
+            batch_size=2,
+            device="cpu",
         )
         assert logits.shape[0] == 4
         assert targets.shape[0] == 4
@@ -183,6 +198,7 @@ class TestCollectLogitsAndTargets:
 # score_candidates_bce
 # ---------------------------------------------------------------------------
 
+
 class TestScoreCandidatesBCE:
     def test_returns_per_row_scores_for_full_catalog(self, tmp_path):
         task_dir = tmp_path / "task"
@@ -190,20 +206,29 @@ class TestScoreCandidatesBCE:
         idx, model = _stage_task_dir(task_dir)
 
         # Two input rows; full catalog = 4 items.
-        df = pd.DataFrame({
-            "user_id": ["u1", "u2"],
-            "item_id": ["i1", "i2"],
-            "label": [1.0, 0.0],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": ["u1", "u2"],
+                "item_id": ["i1", "i2"],
+                "label": [1.0, 0.0],
+            }
+        )
         from mars_rec.data.dataset import preprocess_interactions_data_frame
         from mars_rec.utils.index_mapping import transform_with_indexing
+
         df = preprocess_interactions_data_frame(df, e2e_config)
         transform_with_indexing(df, idx, e2e_config)
         full_catalog = np.array([3, 4, 5, 6], dtype=np.int64)
 
         turn_scores, eligible_per_row = score_candidates_bce(
-            model, df, e2e_config, idx, full_catalog,
-            batch_size=32, turn_batch_size=2, device="cpu",
+            model,
+            df,
+            e2e_config,
+            idx,
+            full_catalog,
+            batch_size=32,
+            turn_batch_size=2,
+            device="cpu",
             show_progress=False,
         )
         assert len(turn_scores) == 2

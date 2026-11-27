@@ -34,8 +34,8 @@ Two helper functions are also exposed:
   test split or on an external file (CSV or parquet). Backs the
   ``mars-rec evaluate`` CLI command.
 """
+
 import abc
-import functools
 import gc
 import hashlib
 import json
@@ -50,9 +50,7 @@ import time
 import warnings
 from contextlib import redirect_stdout
 from copy import deepcopy
-from multiprocessing import Pool
-from typing import Type, Dict, List, Optional, Tuple, Union, Any, cast
-import math
+from typing import Type, Dict, List, Optional, Tuple, Any, cast
 import luigi
 import numpy as np
 import pandas as pd
@@ -76,15 +74,13 @@ from torch.optim.lr_scheduler import (
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_convert
-from torch.utils.data.dataset import Dataset, ChainDataset
+from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import seaborn as sns
 
-import mars_rec
 from mars_rec.cuda import CudaRepository
 from mars_rec.data.dataset import (
     preprocess_interactions_data_frame,
@@ -92,7 +88,7 @@ from mars_rec.data.dataset import (
     literal_eval_array_columns,
     InteractionsDataset,
 )
-from mars_rec.meta_config import Column, IOType, ProjectConfig
+from mars_rec.meta_config import IOType, ProjectConfig
 from mars_rec.model.abstract import RecommenderModule
 from mars_rec.torch.data import NoAutoCollationDataLoader, FasterBatchSampler
 from mars_rec.torch.init import lecun_normal_init, he_init
@@ -116,7 +112,6 @@ from mars_rec.torch.optimizer import RAdam
 from mars_rec.torch.summary import summary
 from mars_rec.utils.files import (
     get_params_path,
-    get_weights_path,
     get_params,
     get_history_path,
     get_tensorboard_logdir,
@@ -137,7 +132,6 @@ from mars_rec.utils.plot import (
     plot_roc_curve,
     plot_precision_recall_curve,
 )
-from mars_rec.utils import files
 from mars_rec.utils.logging import banner, setup_logging
 from mars_rec.utils.reflection import load_attr
 
@@ -184,12 +178,8 @@ TORCH_LOSS_FUNCTIONS = dict(
 
 # Loss functions that require EmbeddingRecommenderLightningModule (pred_emb, target_emb).
 _EMBEDDING_LOSSES = {"infonce", "cosine_similarity", "hardneg_infonce"}
-TORCH_ACTIVATION_FUNCTIONS = dict(
-    relu=F.relu, selu=F.selu, tanh=torch.tanh, sigmoid=torch.sigmoid, linear=F.linear
-)
-TORCH_WEIGHT_INIT = dict(
-    lecun_normal=lecun_normal_init, he=he_init, xavier_normal=xavier_normal_
-)
+TORCH_ACTIVATION_FUNCTIONS = dict(relu=F.relu, selu=F.selu, tanh=torch.tanh, sigmoid=torch.sigmoid, linear=F.linear)
+TORCH_WEIGHT_INIT = dict(lecun_normal=lecun_normal_init, he=he_init, xavier_normal=xavier_normal_)
 TORCH_DROPOUT_MODULES = dict(dropout=nn.Dropout, alpha=nn.AlphaDropout)
 
 SEED = 42
@@ -201,9 +191,9 @@ elif torch.backends.mps.is_available():
 else:
     DEFAULT_DEVICE = "cpu"
 
-TRAIN_DATA = 'train_data'
-VAL_DATA = 'val_data'
-TEST_DATA = 'test_data'
+TRAIN_DATA = "train_data"
+VAL_DATA = "val_data"
+TEST_DATA = "test_data"
 
 
 class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
@@ -228,19 +218,13 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
     minimum_interactions: int = luigi.IntParameter(default=5)
     session_test_size: float = luigi.FloatParameter(default=0.10)
     test_size: float = luigi.FloatParameter(default=0.2)
-    dataset_split_method: str = luigi.ChoiceParameter(
-        choices=["holdout", "column", "time", "k_fold"], default="time"
-    )
-    test_split_type: str = luigi.ChoiceParameter(
-        choices=["random", "time"], default="random"
-    )
+    dataset_split_method: str = luigi.ChoiceParameter(choices=["holdout", "column", "time", "k_fold"], default="time")
+    test_split_type: str = luigi.ChoiceParameter(choices=["random", "time"], default="random")
     val_size: float = luigi.FloatParameter(default=0.2)
     n_splits: int = luigi.IntParameter(default=5)
     split_index: int = luigi.IntParameter(default=0)
     data_frames_preparation_extra_params: dict = luigi.DictParameter(default={})
-    sampling_strategy: str = luigi.ChoiceParameter(
-        choices=["oversample", "undersample", "none"], default="none"
-    )
+    sampling_strategy: str = luigi.ChoiceParameter(choices=["oversample", "undersample", "none"], default="none")
     balance_fields: List[str] = luigi.ListParameter(default=[])
     sampling_proportions: Dict[str, Dict[str, float]] = luigi.DictParameter(default={})
     use_sampling_in_validation: bool = luigi.BoolParameter(default=False)
@@ -257,7 +241,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         # Invalidate data preparation outputs
         prep = self.prepare_data_frames
         for target in prep.output():
-            if hasattr(target, 'path') and os.path.exists(target.path):
+            if hasattr(target, "path") and os.path.exists(target.path):
                 os.remove(target.path)
         # Invalidate own output
         if self.output().exists():
@@ -292,8 +276,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             split_index=self.split_index,
             sampling_strategy=self.sampling_strategy,
             sampling_proportions=self.sampling_proportions,
-            balance_fields=self.balance_fields
-            or self.project_config.default_balance_fields,
+            balance_fields=self.balance_fields or self.project_config.default_balance_fields,
             item_column=self.project_config.item_column.name,
             available_items_column_name=self.project_config.available_items_column_name,
             use_sampling_in_validation=self.use_sampling_in_validation,
@@ -315,9 +298,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
 
     def _save_params(self):
         with open(get_params_path(self.output().path), "w") as params_file:
-            json.dump(
-                self.param_kwargs, params_file, default=lambda o: dict(o), indent=4
-            )
+            json.dump(self.param_kwargs, params_file, default=lambda o: dict(o), indent=4)
 
     @property
     def train_data_frame_path(self) -> str:
@@ -342,26 +323,18 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
     def metadata_data_frame(self) -> Optional[pd.DataFrame]:
         if not hasattr(self, "_metadata_data_frame"):
             self._metadata_data_frame = (
-                pd.read_csv(self.metadata_data_frame_path)
-                if self.metadata_data_frame_path
-                else None
+                pd.read_csv(self.metadata_data_frame_path) if self.metadata_data_frame_path else None
             )
             if self._metadata_data_frame is not None:
-                literal_eval_array_columns(
-                    self._metadata_data_frame, self.project_config.metadata_columns
-                )
-            transform_with_indexing(
-                self._metadata_data_frame, self.index_mapping, self.project_config
-            )
+                literal_eval_array_columns(self._metadata_data_frame, self.project_config.metadata_columns)
+            transform_with_indexing(self._metadata_data_frame, self.index_mapping, self.project_config)
         return self._metadata_data_frame
 
     @property
     def embeddings_for_metadata(self) -> Optional[Dict[str, np.ndarray]]:
         if not hasattr(self, "_embeddings_for_metadata"):
             self._embeddings_for_metadata = (
-                preprocess_metadata_data_frame(
-                    self.metadata_data_frame, self.project_config
-                )
+                preprocess_metadata_data_frame(self.metadata_data_frame, self.project_config)
                 if self.metadata_data_frame is not None
                 else None
             )
@@ -387,8 +360,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         if not hasattr(self, "_train_data_frame"):
             logger.info("Loading train data frame: %s", self.train_data_frame_path)
             self._train_data_frame = preprocess_interactions_data_frame(
-                pd.read_csv(self.train_data_frame_path,
-                    usecols=self.dataset_read_columns), self.project_config
+                pd.read_csv(self.train_data_frame_path, usecols=self.dataset_read_columns), self.project_config
             )
 
             # Snapshot the RAW values of sample_keys_columns BEFORE
@@ -402,9 +374,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             if keys_present:
                 self._train_data_frame_raw_keys = self._train_data_frame[keys_present].copy()
 
-            transform_with_indexing(
-                self._train_data_frame, self.index_mapping, self.project_config
-            )
+            transform_with_indexing(self._train_data_frame, self.index_mapping, self.project_config)
 
         return self._train_data_frame
 
@@ -413,13 +383,10 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         if not hasattr(self, "_val_data_frame"):
             logger.info("Loading val data frame: %s", self.val_data_frame_path)
             self._val_data_frame = preprocess_interactions_data_frame(
-                pd.read_csv(self.val_data_frame_path,
-                    usecols=self.dataset_read_columns), self.project_config
+                pd.read_csv(self.val_data_frame_path, usecols=self.dataset_read_columns), self.project_config
             )
 
-            transform_with_indexing(
-                self._val_data_frame, self.index_mapping, self.project_config
-            )
+            transform_with_indexing(self._val_data_frame, self.index_mapping, self.project_config)
 
         return self._val_data_frame
 
@@ -428,21 +395,20 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         if not hasattr(self, "_test_data_frame"):
             logger.info("Loading test data frame: %s", self.test_data_frame_path)
             self._test_data_frame = preprocess_interactions_data_frame(
-                pd.read_csv(self.test_data_frame_path,
-                    usecols=self.dataset_read_columns), self.project_config
+                pd.read_csv(self.test_data_frame_path, usecols=self.dataset_read_columns), self.project_config
             )
 
-            transform_with_indexing(
-                self._test_data_frame, self.index_mapping, self.project_config
-            )
+            transform_with_indexing(self._test_data_frame, self.index_mapping, self.project_config)
 
         return self._test_data_frame
 
     def get_data_frame_for_indexing(self) -> pd.DataFrame:
-        return pd.concat([pd.read_csv(self.train_data_frame_path,
-                                usecols=self.dataset_read_columns),
-                         pd.read_csv(self.val_data_frame_path,
-                                usecols=self.dataset_read_columns)]).drop_duplicates()
+        return pd.concat(
+            [
+                pd.read_csv(self.train_data_frame_path, usecols=self.dataset_read_columns),
+                pd.read_csv(self.val_data_frame_path, usecols=self.dataset_read_columns),
+            ]
+        ).drop_duplicates()
 
     def get_data_frame_interactions(self) -> pd.DataFrame:
         return self.get_data_frame_for_indexing()
@@ -459,9 +425,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             logger.info("Building index_mapping (path=%s)", self.index_mapping_path)
 
             self._creating_index_mapping = True
-            df = preprocess_interactions_data_frame(
-                    self.get_data_frame_for_indexing(), self.project_config
-                )
+            df = preprocess_interactions_data_frame(self.get_data_frame_for_indexing(), self.project_config)
 
             if os.path.exists(self.index_mapping_path):
                 with open(self.index_mapping_path, "rb") as f:
@@ -476,13 +440,9 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             keys_in_map = list(self._index_mapping.keys())
             project_all_columns = [c for c in self.project_config.all_columns if c.name not in keys_in_map]
 
-            new_scalar = [
-                c.name for c in project_all_columns
-                if c.type == IOType.INDEXABLE and not c.same_index_as
-            ]
+            new_scalar = [c.name for c in project_all_columns if c.type == IOType.INDEXABLE and not c.same_index_as]
             new_array = [
-                c.name for c in project_all_columns
-                if c.type == IOType.INDEXABLE_ARRAY and not c.same_index_as
+                c.name for c in project_all_columns if c.type == IOType.INDEXABLE_ARRAY and not c.same_index_as
             ]
             for column in project_all_columns:
                 if column.type == IOType.INDEXABLE and not column.same_index_as:
@@ -490,20 +450,15 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
 
             self._index_mapping.update(
                 {
-                    column.name: create_index_mapping_from_arrays(
-                        df[column.name].values
-                    )
+                    column.name: create_index_mapping_from_arrays(df[column.name].values)
                     for column in project_all_columns
-                    if column.type == IOType.INDEXABLE_ARRAY
-                    and not column.same_index_as
+                    if column.type == IOType.INDEXABLE_ARRAY and not column.same_index_as
                 }
             )
 
             for column in project_all_columns:
                 if column.same_index_as:
-                    self._index_mapping[column.name] = self._index_mapping[
-                        column.same_index_as
-                    ]
+                    self._index_mapping[column.name] = self._index_mapping[column.same_index_as]
 
             del self._creating_index_mapping
             del df
@@ -513,19 +468,17 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
 
             if new_scalar or new_array:
                 logger.info(
-                    "  indexed %d scalar + %d array columns "
-                    "(total=%d)",
-                    len(new_scalar), len(new_array), len(self._index_mapping),
+                    "  indexed %d scalar + %d array columns (total=%d)",
+                    len(new_scalar),
+                    len(new_array),
+                    len(self._index_mapping),
                 )
 
         return self._index_mapping
 
     @property
     def reverse_index_mapping(self) -> Dict[str, Dict[int, Any]]:
-        rev = {
-            key: {value_: key_ for key_, value_ in mapping.items()}
-            for key, mapping in self.index_mapping.items()
-        }
+        rev = {key: {value_: key_ for key_, value_ in mapping.items()} for key, mapping in self.index_mapping.items()}
         # add nothing 0
         for key, mapping in self.index_mapping.items():
             rev[key][0] = 0
@@ -539,7 +492,10 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
                 shapes = {k: v.shape for k, v in emb.items()}
                 print(f"[META] embeddings_for_metadata keys={list(emb.keys())} shapes={shapes}", flush=True)
             else:
-                print(f"[META] embeddings_for_metadata is None! metadata_path={self.metadata_data_frame_path} input_len={len(self.input())}", flush=True)
+                print(
+                    f"[META] embeddings_for_metadata is None! metadata_path={self.metadata_data_frame_path} input_len={len(self.input())}",
+                    flush=True,
+                )
             self._train_dataset = self.project_config.dataset_class(
                 data_frame=self.train_data_frame,
                 embeddings_for_metadata=emb,
@@ -582,19 +538,13 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
     @property
     def n_users(self) -> int:
         if not hasattr(self, "_n_users"):
-            self._n_users = (
-                max(self.index_mapping[self.project_config.user_column.name].values())
-                + 1
-            )
+            self._n_users = max(self.index_mapping[self.project_config.user_column.name].values()) + 1
         return self._n_users
 
     @property
     def n_items(self) -> int:
         if not hasattr(self, "_n_items"):
-            self._n_items = (
-                max(self.index_mapping[self.project_config.item_column.name].values())
-                + 1
-            )
+            self._n_items = max(self.index_mapping[self.project_config.item_column.name].values()) + 1
         return self._n_items
 
     def index_mapping_max_value(self, key: str) -> int:
@@ -659,9 +609,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
 
     batch_size: int = luigi.IntParameter(default=500)
     epochs: int = luigi.IntParameter(default=100)
-    optimizer: str = luigi.ChoiceParameter(
-        choices=TORCH_OPTIMIZERS.keys(), default="adam"
-    )
+    optimizer: str = luigi.ChoiceParameter(choices=TORCH_OPTIMIZERS.keys(), default="adam")
     optimizer_params: dict = luigi.DictParameter(default={})
     learning_rate: float = luigi.FloatParameter(1e-3)
     # Optional LR scheduler. Empty string = legacy behaviour (no scheduler).
@@ -669,13 +617,9 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
     # ``reduce_on_plateau`` the special keys ``monitor`` (default ``val_loss``),
     # ``interval`` (default ``epoch``), and ``frequency`` (default 1) are
     # consumed by Lightning rather than by the scheduler itself.
-    lr_scheduler: str = luigi.ChoiceParameter(
-        choices=list(TORCH_LR_SCHEDULERS.keys()) + [""], default=""
-    )
+    lr_scheduler: str = luigi.ChoiceParameter(choices=list(TORCH_LR_SCHEDULERS.keys()) + [""], default="")
     lr_scheduler_params: dict = luigi.DictParameter(default={})
-    loss_function: str = luigi.ChoiceParameter(
-        choices=TORCH_LOSS_FUNCTIONS.keys(), default="bce"
-    )
+    loss_function: str = luigi.ChoiceParameter(choices=TORCH_LOSS_FUNCTIONS.keys(), default="bce")
     loss_function_params: dict = luigi.DictParameter(default={})
     gradient_norm_clipping: float = luigi.FloatParameter(default=0.0)
     gradient_norm_clipping_type: float = luigi.IntParameter(default=2)
@@ -730,14 +674,10 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 self._device_id = None
         return self._device_id
 
-
-
     @property
     def module_class(self) -> Type[RecommenderModule]:
         if not hasattr(self, "_module_class"):
-            self._module_class = load_attr(
-                self.recommender_module_class, RecommenderModule
-            )
+            self._module_class = load_attr(self.recommender_module_class, RecommenderModule)
         return self._module_class
 
     @property
@@ -772,8 +712,11 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         )
         logger.info(
             "training: epochs=%s | batch_size=%s | lr=%s | loss=%s | optimizer=%s",
-            self.epochs, self.batch_size, self.learning_rate,
-            self.loss_function, self.optimizer,
+            self.epochs,
+            self.batch_size,
+            self.learning_rate,
+            self.loss_function,
+            self.optimizer,
         )
 
         train_loader = self.get_train_generator()
@@ -792,7 +735,9 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         # already used to seed training, so reusing it keeps the sample
         # reproducible per task_id.
         sample_data = self.train_data_frame.sample(
-            100, replace=True, random_state=int(self.seed),
+            100,
+            replace=True,
+            random_state=int(self.seed),
         )
         sample_data.to_csv(os.path.join(self.output().path, "sample_train.csv"))
 
@@ -816,6 +761,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         # checkpoint. trace=True captures real tensor shapes via forward hooks.
         # Failures are logged and swallowed: a diagram never blocks training.
         from mars_rec.visualization import generate_architecture_diagram
+
         viz_params = {
             "project": self.project,
             "recommender_module_class": self.recommender_module_class,
@@ -833,8 +779,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 device=self.device,
             )
         except Exception:  # noqa: BLE001 — never let viz crash training
-            logger.warning("Architecture diagram generation failed — continuing",
-                          exc_info=True)
+            logger.warning("Architecture diagram generation failed — continuing", exc_info=True)
 
         lit_module = self.create_lightning_module(module)
         log_steps = max(1, min(50, len(train_loader)))
@@ -859,7 +804,8 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         )
         history_fig.savefig(
             os.path.join(self.output().path, "plot_history.jpg"),
-            dpi=150, bbox_inches="tight",
+            dpi=150,
+            bbox_inches="tight",
         )
         plt.close(history_fig)
 
@@ -922,9 +868,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 # Last epoch metrics
                 last = hist_df.iloc[-1]
                 history_summary["last_epoch_metrics"] = {
-                    col: float(last[col])
-                    for col in hist_df.columns
-                    if col != "epoch" and not pd.isna(last[col])
+                    col: float(last[col]) for col in hist_df.columns if col != "epoch" and not pd.isna(last[col])
                 }
 
         # --- Data splits info ---
@@ -937,28 +881,23 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             "output_column": self.project_config.output_column.name,
         }
         if self.project_config.item_column:
-            data_info["n_items"] = len(
-                self.train_data_frame[self.project_config.item_column.name].unique()
-            )
+            data_info["n_items"] = len(self.train_data_frame[self.project_config.item_column.name].unique())
         if self.project_config.user_column:
-            data_info["n_users"] = len(
-                self.train_data_frame[self.project_config.user_column.name].unique()
-            )
+            data_info["n_users"] = len(self.train_data_frame[self.project_config.user_column.name].unique())
 
         # --- Artifacts list ---
-        artifacts = sorted(
-            fname for fname in os.listdir(output_dir)
-            if os.path.isfile(os.path.join(output_dir, fname))
-        ) if os.path.isdir(output_dir) else []
+        artifacts = (
+            sorted(fname for fname in os.listdir(output_dir) if os.path.isfile(os.path.join(output_dir, fname)))
+            if os.path.isdir(output_dir)
+            else []
+        )
 
         # --- Build metadata ---
         metadata = {
             "run": {
                 "task_id": self.task_id,
                 "task_class": self.__class__.__name__,
-                "started_at": datetime.fromtimestamp(
-                    self._train_start_time, tz=timezone.utc
-                ).isoformat(),
+                "started_at": datetime.fromtimestamp(self._train_start_time, tz=timezone.utc).isoformat(),
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "duration_seconds": round(train_duration, 2),
                 "seed": self.seed,
@@ -982,15 +921,12 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 "epochs": self.epochs,
                 "batch_size": self.batch_size,
                 "optimizer": self.optimizer,
-                "optimizer_params": dict(self.optimizer_params)
-                    if self.optimizer_params else {},
+                "optimizer_params": dict(self.optimizer_params) if self.optimizer_params else {},
                 "learning_rate": self.learning_rate,
                 "lr_scheduler": self.lr_scheduler,
-                "lr_scheduler_params": dict(self.lr_scheduler_params)
-                    if self.lr_scheduler_params else {},
+                "lr_scheduler_params": dict(self.lr_scheduler_params) if self.lr_scheduler_params else {},
                 "loss_function": self.loss_function,
-                "loss_function_params": dict(self.loss_function_params)
-                    if self.loss_function_params else {},
+                "loss_function_params": dict(self.loss_function_params) if self.loss_function_params else {},
                 "metrics": list(self.metrics),
                 "early_stopping_patience": self.early_stopping_patience,
                 "early_stopping_min_delta": self.early_stopping_min_delta,
@@ -1079,7 +1015,10 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             else RecommenderLightningModule
         )
         return cls(
-            module, optimizer, loss_fn, self.metrics,
+            module,
+            optimizer,
+            loss_fn,
+            self.metrics,
             loss_name=self.loss_function,
             lr_scheduler_config=lr_scheduler_config,
         )
@@ -1124,9 +1063,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         return TORCH_LOSS_FUNCTIONS[self.loss_function](**params)
 
     def _get_optimizer(self, module) -> Optimizer:
-        return TORCH_OPTIMIZERS[self.optimizer](
-            module.parameters(), lr=self.learning_rate, **self.optimizer_params
-        )
+        return TORCH_OPTIMIZERS[self.optimizer](module.parameters(), lr=self.learning_rate, **self.optimizer_params)
 
     def _get_lr_scheduler_config(self, optimizer: Optimizer) -> Optional[dict]:
         if not self.lr_scheduler:
@@ -1173,6 +1110,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         ds_cls = self.project_config.dataset_class
         if hasattr(ds_cls, "set_model"):
             from mars_rec.torch.callbacks import DynamicNegativeMiningCallback
+
             callbacks.append(DynamicNegativeMiningCallback())
 
         return callbacks
@@ -1233,9 +1171,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             # buffers like `loss_fn.pos_weight` (registered when BCEWithLogitsLoss
             # gets a pos_weight tensor) that don't belong to the recommender.
             state_dict = {
-                k[len("module."):]: v
-                for k, v in checkpoint["state_dict"].items()
-                if k.startswith("module.")
+                k[len("module.") :]: v for k, v in checkpoint["state_dict"].items() if k.startswith("module.")
             }
             module.load_state_dict(state_dict)
         else:
@@ -1249,6 +1185,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         task_dir = self.source_task_dir
         # Lightning ModelCheckpoint saves as weights.ckpt (or weights-v1.ckpt, etc.)
         import glob as glob_module
+
         ckpt_files = glob_module.glob(os.path.join(task_dir, "weights*.ckpt"))
         if ckpt_files:
             # Return the most recently modified
@@ -1310,27 +1247,25 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         with torch.no_grad():
             for x, _ in generator:
                 input_params = x if isinstance(x, (list, tuple)) else [x]
-                input_params = [
-                    t.to(self.torch_device) if isinstance(t, torch.Tensor) else t
-                    for t in input_params
-                ]
+                input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
                 scores_tensor = model.recommendation_score(*input_params)
-                all_scores.extend(
-                    scores_tensor.cpu().numpy().reshape(-1).tolist()
-                )
+                all_scores.extend(scores_tensor.cpu().numpy().reshape(-1).tolist())
 
         if len(all_scores) != len(df_sample):
             logger.warning(
                 "sample_train_scores: %d scores produced for %d rows — "
                 "row_idx alignment may be off; writing what we have.",
-                len(all_scores), len(df_sample),
+                len(all_scores),
+                len(df_sample),
             )
 
         out_path = os.path.join(self.output().path, "sample_train_scores.csv")
-        pd.DataFrame({
-            "row_idx": list(range(len(all_scores))),
-            "train_logit": all_scores,
-        }).to_csv(out_path, index=False)
+        pd.DataFrame(
+            {
+                "row_idx": list(range(len(all_scores))),
+                "train_logit": all_scores,
+            }
+        ).to_csv(out_path, index=False)
         logger.info("sample_train_scores saved → %s", out_path)
 
     @property
@@ -1361,11 +1296,9 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         if not ref:
             return None
         if ":" not in ref:
-            raise ValueError(
-                f"train_sample_weights_provider must be 'module.path:func', "
-                f"got {ref!r}"
-            )
+            raise ValueError(f"train_sample_weights_provider must be 'module.path:func', got {ref!r}")
         import importlib
+
         module_path, func_name = ref.rsplit(":", 1)
         module = importlib.import_module(module_path)
         func = getattr(module, func_name)
@@ -1374,7 +1307,8 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
     def get_train_generator(self) -> DataLoader:
         sample_weights = self._resolve_train_sample_weights()
         batch_sampler = FasterBatchSampler(
-            self.train_dataset, self.batch_size,
+            self.train_dataset,
+            self.batch_size,
             shuffle=True if sample_weights is None else False,
             sample_weights=sample_weights,
         )
@@ -1388,9 +1322,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
     def get_val_generator(self) -> Optional[DataLoader]:
         if len(self.val_data_frame) == 0:
             return None
-        batch_sampler = FasterBatchSampler(
-            self.val_dataset, self.batch_size, shuffle=False
-        )
+        batch_sampler = FasterBatchSampler(self.val_dataset, self.batch_size, shuffle=False)
         return NoAutoCollationDataLoader(
             self.val_dataset,
             batch_sampler=batch_sampler,
@@ -1399,9 +1331,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         )
 
     def get_test_generator(self) -> DataLoader:
-        batch_sampler = FasterBatchSampler(
-            self.test_dataset, self.batch_size, shuffle=False
-        )
+        batch_sampler = FasterBatchSampler(self.test_dataset, self.batch_size, shuffle=False)
         return NoAutoCollationDataLoader(
             self.test_dataset,
             batch_sampler=batch_sampler,
@@ -1452,10 +1382,8 @@ class SupervisedModelTraining(TorchModelTraining):
     @property
     def unique_items(self) -> List[int]:
         if not hasattr(self, "_unique_items"):
-            self._unique_items = list(
-                self.index_mapping[self.project_config.item_column.name].keys()
-            )[1:-1]
-            self._unique_items = [x for x in self._unique_items if str(x) != 'nan']
+            self._unique_items = list(self.index_mapping[self.project_config.item_column.name].keys())[1:-1]
+            self._unique_items = [x for x in self._unique_items if str(x) != "nan"]
         return self._unique_items
 
     @property
@@ -1495,23 +1423,22 @@ class SupervisedModelTraining(TorchModelTraining):
                 full_catalog = self._full_catalog_idx()
                 cand_idx = provider.get_candidates(ob, full_catalog)
                 if len(cand_idx) > 0:
-                    rev = self.reverse_index_mapping[
-                        self.project_config.item_column.name
-                    ]
+                    rev = self.reverse_index_mapping[self.project_config.item_column.name]
                     items = [rev[int(i)] for i in cand_idx if int(i) in rev]
                     if items:
                         return items
 
-        if self.project_config.available_items_column_name and \
-                self.project_config.available_items_column_name in ob:
+        if self.project_config.available_items_column_name and self.project_config.available_items_column_name in ob:
             items = ob[self.project_config.available_items_column_name]
             items = rng.sample(items, len(items))
         else:
-            if ob[self.project_config.item_column.name] in \
-                    self.reverse_index_mapping[self.project_config.item_column.name]:
-                ob_item = self.reverse_index_mapping[
-                    self.project_config.item_column.name
-                ][ob[self.project_config.item_column.name]]
+            if (
+                ob[self.project_config.item_column.name]
+                in self.reverse_index_mapping[self.project_config.item_column.name]
+            ):
+                ob_item = self.reverse_index_mapping[self.project_config.item_column.name][
+                    ob[self.project_config.item_column.name]
+                ]
                 items = rng.sample(self.unique_items, min(101, len(self.unique_items)))
                 items.append(ob_item)
                 items = list(np.unique(items))
@@ -1524,12 +1451,13 @@ class SupervisedModelTraining(TorchModelTraining):
         """Build (and cache) the CandidateProvider declared by the project, if any."""
         if hasattr(self, "_cached_candidate_provider"):
             return self._cached_candidate_provider
-        from mars_rec.filtering import resolve_candidate_provider
         # ``available_items_column_name`` already has a dedicated branch below,
         # so we deliberately skip the legacy fallback here — pass an explicit
         # factory check instead.
         factory = getattr(
-            self.project_config, "candidate_provider_factory", None,
+            self.project_config,
+            "candidate_provider_factory",
+            None,
         )
         if factory is None:
             self._cached_candidate_provider = None
@@ -1546,12 +1474,10 @@ class SupervisedModelTraining(TorchModelTraining):
         if hasattr(self, "_cached_full_catalog_idx"):
             return self._cached_full_catalog_idx
         item_map = self.index_mapping.get(
-            self.project_config.item_column.name, {},
+            self.project_config.item_column.name,
+            {},
         )
-        idx = sorted(
-            int(v) for k, v in item_map.items()
-            if k is not None and int(v) > 1
-        )
+        idx = sorted(int(v) for k, v in item_map.items() if k is not None and int(v) > 1)
         self._cached_full_catalog_idx = np.asarray(idx, dtype=np.int64)
         return self._cached_full_catalog_idx
 
@@ -1577,13 +1503,9 @@ class SupervisedModelTraining(TorchModelTraining):
         score_arrays = []
 
         with torch.no_grad():
-            for i, (x, _) in tqdm(enumerate(generator), total=len(generator),
-                                   disable=(len(generator) <= 1)):
+            for i, (x, _) in tqdm(enumerate(generator), total=len(generator), disable=(len(generator) <= 1)):
                 input_params = x if isinstance(x, list) or isinstance(x, tuple) else [x]
-                input_params = [
-                    t.to(self.torch_device) if isinstance(t, torch.Tensor) else t
-                    for t in input_params
-                ]
+                input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
 
                 scores_tensor: torch.Tensor = model.recommendation_score(*input_params)
                 score_arrays.append(scores_tensor.cpu().numpy().ravel())
@@ -1610,7 +1532,8 @@ class SupervisedModelTraining(TorchModelTraining):
         )
         fig.savefig(
             os.path.join(self.eval_output_dir, "plot_scores.png"),
-            dpi=150, bbox_inches="tight",
+            dpi=150,
+            bbox_inches="tight",
         )
         plt.close(fig)
 
@@ -1638,10 +1561,7 @@ class SupervisedModelTraining(TorchModelTraining):
         with torch.no_grad():
             for x, y in generator:
                 input_params = x if isinstance(x, (list, tuple)) else [x]
-                input_params = [
-                    t.to(self.torch_device) if isinstance(t, torch.Tensor) else t
-                    for t in input_params
-                ]
+                input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
                 scores_tensor = model.recommendation_score(*input_params)
                 all_scores.extend(scores_tensor.cpu().numpy().reshape(-1).tolist())
 
@@ -1653,8 +1573,13 @@ class SupervisedModelTraining(TorchModelTraining):
 
         # Only apply sigmoid if the loss function expects logits (model outputs raw logits)
         logit_loss_functions = {
-            "bce_logits", "bce_logits_smooth", "ce", "focal_loss",
-            "bpr", "ranknet", "lambdarank",
+            "bce_logits",
+            "bce_logits_smooth",
+            "ce",
+            "focal_loss",
+            "bpr",
+            "ranknet",
+            "lambdarank",
         }
         if self.loss_function in logit_loss_functions:
             y_scores = 1 / (1 + np.exp(-y_scores))  # sigmoid for probabilities
@@ -1701,24 +1626,34 @@ class SupervisedModelTraining(TorchModelTraining):
 
         # Confusion Matrix
         fig = plot_confusion_matrix(
-            y_true, y_scores, threshold=0.5,
-            model_name=model_name, task_id=self.task_id, extra_info=meta,
+            y_true,
+            y_scores,
+            threshold=0.5,
+            model_name=model_name,
+            task_id=self.task_id,
+            extra_info=meta,
         )
         fig.savefig(os.path.join(out_dir, "plot_confusion_matrix.png"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # ROC Curve
         fig = plot_roc_curve(
-            y_true, y_scores,
-            model_name=model_name, task_id=self.task_id, extra_info=meta,
+            y_true,
+            y_scores,
+            model_name=model_name,
+            task_id=self.task_id,
+            extra_info=meta,
         )
         fig.savefig(os.path.join(out_dir, "plot_roc_curve.png"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # Precision-Recall Curve
         fig = plot_precision_recall_curve(
-            y_true, y_scores,
-            model_name=model_name, task_id=self.task_id, extra_info=meta,
+            y_true,
+            y_scores,
+            model_name=model_name,
+            task_id=self.task_id,
+            extra_info=meta,
         )
         fig.savefig(os.path.join(out_dir, "plot_precision_recall_curve.png"), dpi=150, bbox_inches="tight")
         plt.close(fig)
@@ -1736,9 +1671,7 @@ class SupervisedModelTraining(TorchModelTraining):
         """
         if hasattr(self, "_cached_candidate_feature_lookup"):
             return self._cached_candidate_feature_lookup
-        raw = (self.project_config.dataset_extra_params or {}).get(
-            "candidate_feature_lookup"
-        )
+        raw = (self.project_config.dataset_extra_params or {}).get("candidate_feature_lookup")
         if raw is None:
             self._cached_candidate_feature_lookup = None
             return None
@@ -1749,31 +1682,30 @@ class SupervisedModelTraining(TorchModelTraining):
             self._cached_candidate_feature_lookup = None
             return None
         import inspect as _inspect
+
         try:
             sig = _inspect.signature(raw)
-            arity = len([
-                p for p in sig.parameters.values()
-                if p.kind in (
-                    _inspect.Parameter.POSITIONAL_ONLY,
-                    _inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                ) and p.default is _inspect.Parameter.empty
-            ])
+            arity = len(
+                [
+                    p
+                    for p in sig.parameters.values()
+                    if p.kind
+                    in (
+                        _inspect.Parameter.POSITIONAL_ONLY,
+                        _inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    )
+                    and p.default is _inspect.Parameter.empty
+                ]
+            )
         except (TypeError, ValueError):
             arity = 0
         materialised = raw(self.index_mapping) if arity >= 1 else raw()
-        self._cached_candidate_feature_lookup = (
-            materialised if isinstance(materialised, dict) else None
-        )
+        self._cached_candidate_feature_lookup = materialised if isinstance(materialised, dict) else None
         return self._cached_candidate_feature_lookup
 
     def _create_ob_data_frame(self, ob: dict, item_indices: List[int]) -> pd.DataFrame:
-        data = [
-            {**ob, self.project_config.item_column.name: item_index}
-            for item_index in item_indices
-        ]
-        ob_df = pd.DataFrame(
-            columns=self.obs_columns + [self.project_config.item_column.name], data=data
-        )
+        data = [{**ob, self.project_config.item_column.name: item_index} for item_index in item_indices]
+        ob_df = pd.DataFrame(columns=self.obs_columns + [self.project_config.item_column.name], data=data)
 
         ob_df = self._fill_hist_columns(ob_df)
 
@@ -1787,8 +1719,7 @@ class SupervisedModelTraining(TorchModelTraining):
         lookup = self._resolved_candidate_feature_lookup
         if lookup:
             item_idx_arr = np.asarray(item_indices, dtype=np.int64)
-            for col in ("popularity", "release_year_bucket",
-                        "duration_bucket", "album_id"):
+            for col in ("popularity", "release_year_bucket", "duration_bucket", "album_id"):
                 if col in ob_df.columns and col in lookup:
                     ob_df[col] = lookup[col][item_idx_arr]
             if "tag_ids" in ob_df.columns and "tag_ids" in lookup:
@@ -1800,7 +1731,8 @@ class SupervisedModelTraining(TorchModelTraining):
                 and "_artist_per_idx" in lookup
             ):
                 cand_artists = np.asarray(
-                    lookup["_artist_per_idx"][item_idx_arr], dtype=np.int64,
+                    lookup["_artist_per_idx"][item_idx_arr],
+                    dtype=np.int64,
                 )
                 pad_artist = lookup.get("_pad_artist", 0)
                 prev_values = ob_df["prev_artist_ids"].values
@@ -1817,13 +1749,10 @@ class SupervisedModelTraining(TorchModelTraining):
                 else:
                     arc_vals = np.zeros(len(ob_df), dtype=np.int64)
                 ob_df["artist_repeat_count"] = arc_vals
-            if (
-                "album_continuation" in ob_df.columns
-                and "prev_album_ids" in ob_df.columns
-                and "album_id" in lookup
-            ):
+            if "album_continuation" in ob_df.columns and "prev_album_ids" in ob_df.columns and "album_id" in lookup:
                 cand_albums = np.asarray(
-                    lookup["album_id"][item_idx_arr], dtype=np.int64,
+                    lookup["album_id"][item_idx_arr],
+                    dtype=np.int64,
                 )
                 pad_album = lookup.get("_pad_album", 0)
                 prev_values = ob_df["prev_album_ids"].values
@@ -1844,9 +1773,7 @@ class SupervisedModelTraining(TorchModelTraining):
                     last_albums = np.where(has_valid, last_albums, 0)
                     # Compare with candidate
                     valid_cand = (cand_albums > 0) & (cand_albums != pad_album)
-                    cont_vals = np.where(
-                        valid_cand & (last_albums == cand_albums), 1, 0
-                    )
+                    cont_vals = np.where(valid_cand & (last_albums == cand_albums), 1, 0)
                 else:
                     cont_vals = np.zeros(len(ob_df), dtype=np.int64)
                 ob_df["album_continuation"] = cont_vals
@@ -1880,7 +1807,9 @@ class SupervisedModelTraining(TorchModelTraining):
             if (i + 1) % log_every == 0 or (i + 1) == n_obs:
                 logger.info(
                     "  candidates: %d/%d (%.1fs)",
-                    i + 1, n_obs, time.time() - t0,
+                    i + 1,
+                    n_obs,
+                    time.time() - t0,
                 )
 
         # Hoist the mapping dict to avoid repeated dict lookup per observation
@@ -1889,10 +1818,7 @@ class SupervisedModelTraining(TorchModelTraining):
             IOType.INDEXABLE_ARRAY,
         ]:
             item_map = self.index_mapping[self.project_config.item_column.name]
-            item_indices_list = [
-                map_array(items, item_map)
-                for items in items_list
-            ]
+            item_indices_list = [map_array(items, item_map) for items in items_list]
         else:
             item_indices_list = cast(List[List[int]], items_list)
 
@@ -1903,7 +1829,9 @@ class SupervisedModelTraining(TorchModelTraining):
             if (i + 1) % log_every == 0 or (i + 1) == n_obs:
                 logger.info(
                     "  ob_data_frames: %d/%d (%.1fs)",
-                    i + 1, n_obs, time.time() - t1,
+                    i + 1,
+                    n_obs,
+                    time.time() - t1,
                 )
         ob_lengths = [len(df) for df in ob_dfs]
         combined_df = pd.concat(ob_dfs, ignore_index=True, copy=False)
@@ -1923,14 +1851,15 @@ class SupervisedModelTraining(TorchModelTraining):
         all_item_scores = self._get_item_scores(obs_dataset)
         logger.info(
             "  inference: %d scores in %.1fs",
-            len(all_item_scores), time.time() - t2,
+            len(all_item_scores),
+            time.time() - t2,
         )
 
         # Slice numpy array into per-observation lists (numpy slicing is O(1) view)
         item_scores_list: List[List[float]] = []
         offset = 0
         for length in ob_lengths:
-            item_scores_list.append(all_item_scores[offset:offset + length].tolist())
+            item_scores_list.append(all_item_scores[offset : offset + length].tolist())
             offset += length
 
         return items_list, item_indices_list, item_scores_list
@@ -1945,7 +1874,9 @@ class SupervisedModelTraining(TorchModelTraining):
             ).to_dict("records")
             logger.info(
                 "Sampling %d/%d test rows (sample_size_eval, seed=%d)",
-                len(obs), len(self.test_data_frame), self.seed,
+                len(obs),
+                len(self.test_data_frame),
+                self.seed,
             )
         else:
             obs: List[Dict[str, Any]] = self.test_data_frame.to_dict("records")
@@ -1959,9 +1890,7 @@ class SupervisedModelTraining(TorchModelTraining):
             sorted_pairs = sorted(zip(scores, items), reverse=True)
             sorted_actions_list.append([item for _, item in sorted_pairs])
 
-        action_scores_list = [
-            list(reversed(sorted(action_scores))) for action_scores in item_scores_list
-        ]
+        action_scores_list = [list(reversed(sorted(action_scores))) for action_scores in item_scores_list]
 
         del obs
 
@@ -1980,16 +1909,14 @@ class SupervisedModelTraining(TorchModelTraining):
         df_train = self.get_data_frame_interactions()[
             [self.project_config.user_column.name, self.project_config.item_column.name]
         ].drop_duplicates()
-        df_train['trained'] = 1
+        df_train["trained"] = 1
         df = df.merge(
-            df_train,
-            on=[self.project_config.user_column.name, self.project_config.item_column.name],
-            how='left'
+            df_train, on=[self.project_config.user_column.name, self.project_config.item_column.name], how="left"
         )
-        df['trained'] = df['trained'].fillna(0)
+        df["trained"] = df["trained"].fillna(0)
 
         # Add indexed information
-        df['item_indexed'] = df[self.project_config.item_column.name].apply(
+        df["item_indexed"] = df[self.project_config.item_column.name].apply(
             lambda i: self.index_mapping[self.project_config.item_column.name][str(i)] > 0
         )
 
@@ -1999,9 +1926,7 @@ class SupervisedModelTraining(TorchModelTraining):
 
         # Ranking metrics (only when explicitly enabled)
         if self.ranking_metrics:
-            self._ranking_metrics = self._compute_ranking_metrics(
-                df, sorted_actions_list
-            )
+            self._ranking_metrics = self._compute_ranking_metrics(df, sorted_actions_list)
             if self._ranking_metrics:
                 banner("Ranking metrics", logger=logger)
                 for metric_name, value in self._ranking_metrics.items():
@@ -2027,11 +1952,14 @@ class SupervisedModelTraining(TorchModelTraining):
         """
         if self.sample_size_eval and len(self.test_data_frame) > self.sample_size_eval:
             df = self.test_data_frame.sample(
-                self.sample_size_eval, random_state=self.seed,
+                self.sample_size_eval,
+                random_state=self.seed,
             )
             logger.info(
                 "ROC-AUC subsampling %d/%d test rows (sample_size_eval, seed=%d)",
-                len(df), len(self.test_data_frame), self.seed,
+                len(df),
+                len(self.test_data_frame),
+                self.seed,
             )
             return self.project_config.dataset_class(
                 data_frame=df,
@@ -2077,17 +2005,14 @@ class SupervisedModelTraining(TorchModelTraining):
         with torch.no_grad():
             for x, y in generator:
                 input_params = x if isinstance(x, (list, tuple)) else [x]
-                input_params = [
-                    t.to(self.torch_device) if isinstance(t, torch.Tensor) else t
-                    for t in input_params
-                ]
+                input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
                 logits = model.recommendation_score(*input_params).cpu()
                 all_logits.append(logits)
 
                 target = y[0] if isinstance(y, (list, tuple)) else y
                 all_targets.append(target.cpu())
 
-        all_logits = torch.cat(all_logits, dim=0)   # [N, C] or [N]
+        all_logits = torch.cat(all_logits, dim=0)  # [N, C] or [N]
         all_targets = torch.cat(all_targets, dim=0)  # [N]
         y_true = all_targets.numpy().astype(int)
 
@@ -2110,18 +2035,18 @@ class SupervisedModelTraining(TorchModelTraining):
                 y_true_onehot = np.zeros((len(y_true), n_classes), dtype=int)
                 y_true_onehot[np.arange(len(y_true)), y_true] = 1
 
-                results["roc_auc_ovr"] = float(roc_auc_score(
-                    y_true_onehot[:, present_classes],
-                    y_probs[:, present_classes],
-                    multi_class="ovr",
-                    average="macro",
-                ))
+                results["roc_auc_ovr"] = float(
+                    roc_auc_score(
+                        y_true_onehot[:, present_classes],
+                        y_probs[:, present_classes],
+                        multi_class="ovr",
+                        average="macro",
+                    )
+                )
             else:
                 # Binary: sigmoid → probability
                 if len(np.unique(y_true)) < 2:
-                    logger.warning(
-                        "ROC-AUC skipped: only one class present in y_true (undefined)"
-                    )
+                    logger.warning("ROC-AUC skipped: only one class present in y_true (undefined)")
                     return {}
 
                 logit_losses = {"bce_logits", "bce_logits_smooth", "ce", "focal_loss"}
@@ -2155,7 +2080,6 @@ class SupervisedModelTraining(TorchModelTraining):
         if len(ground_truth_items) != len(sorted_actions_list):
             return {}
 
-        max_k = max(ks)
         results = {}
 
         for k in ks:
@@ -2194,9 +2118,7 @@ class SupervisedModelTraining(TorchModelTraining):
             self._save_test_set_predictions()
 
 
-def load_torch_model_training_from_task_dir(
-    model_cls: Type[TorchModelTraining], task_dir: str
-) -> TorchModelTraining:
+def load_torch_model_training_from_task_dir(model_cls: Type[TorchModelTraining], task_dir: str) -> TorchModelTraining:
     """Rebuild a training-task instance from its ``params.json`` on disk.
 
     Reads the parameters persisted at ``task_dir/params.json`` and
@@ -2208,9 +2130,7 @@ def load_torch_model_training_from_task_dir(
     return model_cls(**get_params(task_dir))
 
 
-def load_torch_model_training_from_task_id(
-    model_cls: Type[TorchModelTraining], task_id: str
-) -> TorchModelTraining:
+def load_torch_model_training_from_task_id(model_cls: Type[TorchModelTraining], task_id: str) -> TorchModelTraining:
     """Like :func:`load_torch_model_training_from_task_dir` but by ``task_id``.
 
     Resolves ``task_id`` to its on-disk directory under

@@ -91,4 +91,4 @@ class TestHeInit:
         std1 = tensor1.std().item()
         std2 = tensor2.std().item()
         # He std ≈ sqrt(2/fan_in), LeCun std ≈ sqrt(1/fan_in), ratio ~= sqrt(2)
-        assert abs(std2 / std1 - 2 ** 0.5) < 0.5
+        assert abs(std2 / std1 - 2**0.5) < 0.5

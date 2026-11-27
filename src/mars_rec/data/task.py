@@ -12,6 +12,7 @@ training step consumes.
 multi-file or zip-based downloads typically write their own
 ``luigi.Task`` instead.
 """
+
 import abc
 import itertools
 import math
@@ -104,21 +105,15 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
     test_size: float = luigi.FloatParameter(default=0.2)
     sample_size: int = luigi.IntParameter(default=-1)
     minimum_interactions: int = luigi.IntParameter(default=5)
-    dataset_split_method: str = luigi.ChoiceParameter(
-        choices=["holdout", "time", "column", "k_fold"], default="time"
-    )
+    dataset_split_method: str = luigi.ChoiceParameter(choices=["holdout", "time", "column", "k_fold"], default="time")
     column_stratification: str = luigi.OptionalParameter(default=None)
-    test_split_type: str = luigi.ChoiceParameter(
-        choices=["random", "time"], default="random"
-    )
+    test_split_type: str = luigi.ChoiceParameter(choices=["random", "time"], default="random")
     item_column: str = luigi.Parameter(default="none")
-    available_items_column_name: str = luigi.Parameter(default='available_items')
+    available_items_column_name: str = luigi.Parameter(default="available_items")
     n_splits: int = luigi.IntParameter(default=10)
     split_index: int = luigi.IntParameter(default=0)
     val_size: float = luigi.FloatParameter(default=0.2)
-    sampling_strategy: str = luigi.ChoiceParameter(
-        choices=["oversample", "undersample", "none"], default="none"
-    )
+    sampling_strategy: str = luigi.ChoiceParameter(choices=["oversample", "undersample", "none"], default="none")
     balance_fields: List[str] = luigi.ListParameter(default=[])
     sampling_proportions: Dict[str, Dict[str, float]] = luigi.DictParameter(default={})
     use_sampling_in_validation: bool = luigi.BoolParameter(default=False)
@@ -226,8 +221,7 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
                 luigi.LocalTarget(
                     os.path.join(
                         self.dataset_dir,
-                        "test_%.2f_test=%s_%d_%s.csv"
-                        % (self.test_size, self.test_split_type, self.seed, task_hash),
+                        "test_%.2f_test=%s_%d_%s.csv" % (self.test_size, self.test_split_type, self.seed, task_hash),
                     )
                 ),
             )
@@ -249,15 +243,13 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
                 luigi.LocalTarget(
                     os.path.join(
                         self.dataset_dir,
-                        "val_%.2f_test=%s_%d_%s.csv"
-                        % (self.val_size, self.test_split_type, self.seed, task_hash),
+                        "val_%.2f_test=%s_%d_%s.csv" % (self.val_size, self.test_split_type, self.seed, task_hash),
                     )
                 ),
                 luigi.LocalTarget(
                     os.path.join(
                         self.dataset_dir,
-                        "test_%.2f_test=%s_%d_%s.csv"
-                        % (self.test_size, self.test_split_type, self.seed, task_hash),
+                        "test_%.2f_test=%s_%d_%s.csv" % (self.test_size, self.test_split_type, self.seed, task_hash),
                     )
                 ),
             )
@@ -291,15 +283,9 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
 
         self.train_df, self.val_df, self.test_df = self.split_dataset(df)
 
-        self.transform_data_frame(self.train_df, data_key=self.TRAIN_DATA).to_csv(
-            self.output()[0].path, index=False
-        )
-        self.transform_data_frame(self.val_df, data_key=self.VALIDATION_DATA).to_csv(
-            self.output()[1].path, index=False
-        )
-        self.transform_data_frame(self.test_df, data_key=self.TEST_GENERATOR).to_csv(
-            self.output()[2].path, index=False
-        )
+        self.transform_data_frame(self.train_df, data_key=self.TRAIN_DATA).to_csv(self.output()[0].path, index=False)
+        self.transform_data_frame(self.val_df, data_key=self.VALIDATION_DATA).to_csv(self.output()[1].path, index=False)
+        self.transform_data_frame(self.test_df, data_key=self.TEST_GENERATOR).to_csv(self.output()[2].path, index=False)
 
     def split_dataset(self, df):
         """Split ``df`` into train / val / test according to the Luigi params.
@@ -316,29 +302,19 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         """
         if self.test_size:
             if self.test_split_type == "random":
-                train_df, test_df = self.random_train_test_split(
-                    df, test_size=self.test_size
-                )
+                train_df, test_df = self.random_train_test_split(df, test_size=self.test_size)
             else:
-                train_df, test_df = self.time_train_test_split(
-                    df, test_size=self.test_size
-                )
+                train_df, test_df = self.time_train_test_split(df, test_size=self.test_size)
         else:
             train_df, test_df = df, df[:0]
 
         if self.val_size:
             if self.dataset_split_method == "holdout":
-                train_df, val_df = self.random_train_test_split(
-                    train_df, test_size=self.val_size
-                )
+                train_df, val_df = self.random_train_test_split(train_df, test_size=self.val_size)
             elif self.dataset_split_method == "column":
-                train_df, val_df = self.column_train_test_split(
-                    train_df, test_size=self.val_size
-                )
+                train_df, val_df = self.column_train_test_split(train_df, test_size=self.val_size)
             elif self.dataset_split_method == "time":
-                train_df, val_df = self.time_train_test_split(
-                    train_df, test_size=self.val_size
-                )
+                train_df, val_df = self.time_train_test_split(train_df, test_size=self.val_size)
             else:
                 train_df, val_df = self.kfold_split(train_df)
         else:
@@ -363,6 +339,7 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         cohort, same-genre items, etc.).
         """
         if self.available_items_column_name not in df.columns:
+
             def add_items(item, item_unique):
                 items = random.sample(item_unique, min(99, len(item_unique)))
                 items.append(item)
@@ -390,16 +367,12 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         Uses ``sklearn.model_selection.StratifiedKFold`` with
         ``n_splits`` and ``stratification_property``.
         """
-        skf = StratifiedKFold(
-            n_splits=self.n_splits, shuffle=True, random_state=self.seed
-        )
+        skf = StratifiedKFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
         train_indices, val_indices = next(
             itertools.islice(
                 skf.split(
                     df,
-                    df[self.stratification_property]
-                    if self.stratification_property
-                    else None,
+                    df[self.stratification_property] if self.stratification_property else None,
                 ),
                 self.split_index,
                 self.split_index + 1,
@@ -408,9 +381,7 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         train_df, test_df = df.iloc[train_indices], df.iloc[val_indices]
         return train_df, test_df
 
-    def column_train_test_split(
-        self, df: pd.DataFrame, test_size: float
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def column_train_test_split(self, df: pd.DataFrame, test_size: float) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Split by partitioning the unique values of ``column_stratification``.
 
         Useful when rows sharing a key (e.g. ``user_id`` or
@@ -422,17 +393,13 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         # ``TypeError: only integer scalar arrays can be converted to a
         # scalar index``).
         keys = np.asarray(df[self.column_stratification].unique())
-        keys_train, keys_test = train_test_split(
-            keys, test_size=test_size, random_state=self.seed
-        )
+        keys_train, keys_test = train_test_split(keys, test_size=test_size, random_state=self.seed)
         return (
             df[df[self.column_stratification].isin(keys_train)],
             df[df[self.column_stratification].isin(keys_test)],
         )
 
-    def time_train_test_split(
-        self, df: pd.DataFrame, test_size: float
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def time_train_test_split(self, df: pd.DataFrame, test_size: float) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Time-based split: oldest ``1 - test_size`` rows go to train.
 
         Sorts on :attr:`timestamp_property` first; the split is purely
@@ -446,9 +413,7 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
 
         return df.iloc[:cut], df.iloc[cut:]
 
-    def random_train_test_split(
-        self, df: pd.DataFrame, test_size: float
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def random_train_test_split(self, df: pd.DataFrame, test_size: float) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Plain ``train_test_split`` shuffle, optionally stratified.
 
         Stratification kicks in when
@@ -458,25 +423,19 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         return train_test_split(
             df,
             test_size=test_size,
-            stratify=df[self.stratification_property]
-            if self.stratification_property
-            else None,
+            stratify=df[self.stratification_property] if self.stratification_property else None,
             random_state=self.seed,
         )
 
     def _create_sampling_strategy(self, df: pd.DataFrame, balance_field: str):
         if balance_field in self.sampling_proportions:
-            field_unique_values, counts = np.unique(
-                df[balance_field], return_counts=True
-            )
+            field_unique_values, counts = np.unique(df[balance_field], return_counts=True)
             if self.sampling_strategy == "oversample":
                 min_num_samples = max(counts)
                 min_proportion = min(self.sampling_proportions[balance_field].values())
                 return {
                     field_value: int(
-                        self.sampling_proportions[balance_field][field_value]
-                        * min_num_samples
-                        / min_proportion
+                        self.sampling_proportions[balance_field][field_value] * min_num_samples / min_proportion
                     )
                     for field_value in field_unique_values
                 }
@@ -485,9 +444,7 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
                 max_proportion = max(self.sampling_proportions[balance_field].values())
                 return {
                     field_value: int(
-                        self.sampling_proportions[balance_field][field_value]
-                        * max_num_samples
-                        / max_proportion
+                        self.sampling_proportions[balance_field][field_value] * max_num_samples / max_proportion
                     )
                     for field_value in field_unique_values
                 }

@@ -5,12 +5,18 @@ The ``user_column`` is bound to ``session_id`` (the invoice number) — there
 is no stable customer identifier per row. Demonstrates that ``user_column``
 in mars-rec can be any indexable entity, not just a literal user.
 """
+
 from mars_rec.data.dataset import InteractionsWithNegativeItemGenerationDataset
 from mars_rec.meta_config import (
-    ProjectConfig, Column, IOType, RecommenderType,
+    ProjectConfig,
+    Column,
+    IOType,
+    RecommenderType,
 )
 from examples.online_retail.data import (
-    BASE_DIR, PrepareOnlineRetailDataFrame, HISTORY_LEN,
+    BASE_DIR,
+    PrepareOnlineRetailDataFrame,
+    HISTORY_LEN,
 )
 
 online_retail = ProjectConfig(

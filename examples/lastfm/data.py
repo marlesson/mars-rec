@@ -16,6 +16,7 @@ Pedagogical highlights:
   history sequence shares the item vocabulary.
 - Demonstrates ``dataset_split_method="time"`` for a temporal next-item task.
 """
+
 import os
 import zipfile
 from typing import Optional
@@ -32,10 +33,10 @@ DATASET_DIR: str = os.path.join(BASE_DIR, "dataset")
 
 LASTFM_URL = "https://files.grouplens.org/datasets/hetrec2011/hetrec2011-lastfm-2k.zip"
 
-HISTORY_LEN: int = 10           # number of past artist ids kept per event
-MIN_USER_EVENTS: int = 5        # drop users with fewer than this many events
-MIN_ARTIST_EVENTS: int = 3      # drop very long-tail artists
-PAD_TOKEN: str = "-1"           # framework maps "-1" → index 2 (PAD slot)
+HISTORY_LEN: int = 10  # number of past artist ids kept per event
+MIN_USER_EVENTS: int = 5  # drop users with fewer than this many events
+MIN_ARTIST_EVENTS: int = 3  # drop very long-tail artists
+PAD_TOKEN: str = "-1"  # framework maps "-1" → index 2 (PAD slot)
 
 
 class DownloadAndPrepareLastFM(luigi.Task):
@@ -110,9 +111,7 @@ class DownloadAndPrepareLastFM(luigi.Task):
                 group["timestamp"].values,
             ):
                 if prior:
-                    padded = [PAD_TOKEN] * (HISTORY_LEN - len(prior)) + [
-                        str(a) for a in prior[-HISTORY_LEN:]
-                    ]
+                    padded = [PAD_TOKEN] * (HISTORY_LEN - len(prior)) + [str(a) for a in prior[-HISTORY_LEN:]]
                     rows.append(
                         (
                             str(user_id),
@@ -124,7 +123,8 @@ class DownloadAndPrepareLastFM(luigi.Task):
                 prior.append(int(artist_id))
 
         out = pd.DataFrame(
-            rows, columns=["user_id", "artist_id", "timestamp", "history_artist_ids"],
+            rows,
+            columns=["user_id", "artist_id", "timestamp", "history_artist_ids"],
         )
         out["label"] = 1.0
         # store the array column as a python-literal string so the framework's

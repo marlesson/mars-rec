@@ -19,12 +19,12 @@ Usage (CLI)::
         --model-dir output/models/.../SupervisedModelTraining____32____xxx \\
         --data data/test.parquet --output result.json
 """
+
 import glob
 import json
 import logging
 import os
 import pickle
-import sys
 import time
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 try:
     from tqdm import tqdm
 except ImportError:  # pragma: no cover - tqdm is a runtime convenience
+
     def tqdm(it, **_):  # type: ignore[no-redef]
         return it
 
@@ -63,6 +64,7 @@ except ImportError:  # pragma: no cover - tqdm is a runtime convenience
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
+
 
 def load_trained_model(
     task_dir: str,
@@ -102,10 +104,7 @@ def load_trained_model(
         raise FileNotFoundError(f"No checkpoint found in {task_dir}")
     ckpt_path = max(ckpt_files, key=os.path.getmtime)
     checkpoint = torch.load(ckpt_path, map_location=torch_device, weights_only=False)
-    state_dict = {
-        k.replace("module.", ""): v
-        for k, v in checkpoint["state_dict"].items()
-    }
+    state_dict = {k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()}
     model.load_state_dict(state_dict)
     model.eval()
 
@@ -115,6 +114,7 @@ def load_trained_model(
 # ---------------------------------------------------------------------------
 # Data preprocessing
 # ---------------------------------------------------------------------------
+
 
 def preprocess_raw_data(
     df_raw: pd.DataFrame,
@@ -164,13 +164,13 @@ def preprocess_raw_data(
             if mask.any():
                 # Infer length from first non-null value
                 first_valid = df[col.name].dropna().iloc[0] if (~mask).any() else []
-                pad_len = len(first_valid) if hasattr(first_valid, '__len__') else 1
+                pad_len = len(first_valid) if hasattr(first_valid, "__len__") else 1
                 df.loc[mask, col.name] = [([0] * pad_len)] * mask.sum()
         elif col.type == IOType.FLOAT_ARRAY:
             mask = df[col.name].isna()
             if mask.any():
                 first_valid = df[col.name].dropna().iloc[0] if (~mask).any() else []
-                pad_len = len(first_valid) if hasattr(first_valid, '__len__') else 1
+                pad_len = len(first_valid) if hasattr(first_valid, "__len__") else 1
                 df.loc[mask, col.name] = [([0.0] * pad_len)] * mask.sum()
 
     # Step 2: literal_eval + type conversions
@@ -193,6 +193,7 @@ def preprocess_raw_data(
 # ---------------------------------------------------------------------------
 # Batch inference
 # ---------------------------------------------------------------------------
+
 
 def predict_top_k(
     model: nn.Module,
@@ -227,9 +228,7 @@ def predict_top_k(
 
     use_filter = candidate_provider is not None
     if use_filter and (full_catalog is None or rows is None):
-        raise ValueError(
-            "predict_top_k: candidate_provider requires full_catalog and rows."
-        )
+        raise ValueError("predict_top_k: candidate_provider requires full_catalog and rows.")
 
     all_indices: List[np.ndarray] = []
     all_scores: List[np.ndarray] = []
@@ -238,10 +237,7 @@ def predict_top_k(
     with torch.no_grad():
         for x, _ in loader:
             inputs = x if isinstance(x, (list, tuple)) else [x]
-            inputs = [
-                t.to(torch_device) if isinstance(t, torch.Tensor) else t
-                for t in inputs
-            ]
+            inputs = [t.to(torch_device) if isinstance(t, torch.Tensor) else t for t in inputs]
             logits = model(*inputs)  # [B, C] or [B]
 
             if logits.dim() == 2 and logits.size(1) > 1:
@@ -255,14 +251,17 @@ def predict_top_k(
                     )
                     for j in range(batch_size_actual):
                         eligible = candidate_provider.get_candidates(
-                            rows[row_cursor + j], full_catalog,
+                            rows[row_cursor + j],
+                            full_catalog,
                         )
                         # Clip to vocab range to be safe.
                         elig = np.asarray(eligible, dtype=np.int64)
                         elig = elig[(elig >= 0) & (elig < n_classes)]
                         mask[j, torch.as_tensor(elig, device=logits.device)] = True
                     neg_inf = torch.tensor(
-                        float("-inf"), dtype=logits.dtype, device=logits.device,
+                        float("-inf"),
+                        dtype=logits.dtype,
+                        device=logits.device,
                     )
                     logits = torch.where(mask, logits, neg_inf)
                 actual_k = min(k, logits.size(1))
@@ -283,6 +282,7 @@ def predict_top_k(
 # Reverse mapping
 # ---------------------------------------------------------------------------
 
+
 def build_reverse_item_mapping(
     index_mapping: Dict[str, Dict[Any, int]],
     output_column: str,
@@ -301,6 +301,7 @@ def build_reverse_item_mapping(
 # ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
+
 
 def run_inference(
     task_dir: str,
@@ -348,17 +349,25 @@ def run_inference(
     # --- 3. Preprocess ---
     logger.info("Preprocessing ...")
     df_processed, dataset = preprocess_raw_data(
-        df_raw, project_config, index_mapping,
+        df_raw,
+        project_config,
+        index_mapping,
     )
     logger.info("  dataset size=%d", len(dataset))
 
     # --- 4. Predict ---
     logger.info(
         "Running inference (batch_size=%d, k=%d, device=%s)",
-        batch_size, k, device,
+        batch_size,
+        k,
+        device,
     )
     top_k_indices, top_k_scores = predict_top_k(
-        model, dataset, batch_size=batch_size, k=k, device=device,
+        model,
+        dataset,
+        batch_size=batch_size,
+        k=k,
+        device=device,
     )
 
     # --- 5. Reverse map ---
@@ -411,6 +420,7 @@ def run_inference(
 # Batch inference — collect full logits + targets
 # ---------------------------------------------------------------------------
 
+
 def _collect_logits_and_targets(
     model: nn.Module,
     dataset: Dataset,
@@ -438,10 +448,7 @@ def _collect_logits_and_targets(
     with torch.no_grad():
         for x, y in loader:
             inputs = x if isinstance(x, (list, tuple)) else [x]
-            inputs = [
-                t.to(torch_device) if isinstance(t, torch.Tensor) else t
-                for t in inputs
-            ]
+            inputs = [t.to(torch_device) if isinstance(t, torch.Tensor) else t for t in inputs]
             logits = model(*inputs).cpu()
             all_logits.append(logits)
 
@@ -454,6 +461,7 @@ def _collect_logits_and_targets(
 # ---------------------------------------------------------------------------
 # Standalone metric functions
 # ---------------------------------------------------------------------------
+
 
 def compute_ranking_metrics(
     ground_truth_items: List[str],
@@ -538,16 +546,23 @@ def compute_roc_auc(
             y_true_onehot = np.zeros((len(y_true), n_classes), dtype=int)
             y_true_onehot[np.arange(len(y_true)), y_true] = 1
 
-            results["roc_auc_ovr"] = float(roc_auc_score(
-                y_true_onehot[:, present_classes],
-                y_probs[:, present_classes],
-                multi_class="ovr",
-                average="macro",
-            ))
+            results["roc_auc_ovr"] = float(
+                roc_auc_score(
+                    y_true_onehot[:, present_classes],
+                    y_probs[:, present_classes],
+                    multi_class="ovr",
+                    average="macro",
+                )
+            )
         else:
             logit_losses = {
-                "bce_logits", "bce_logits_smooth", "ce", "focal_loss",
-                "bpr", "ranknet", "lambdarank",
+                "bce_logits",
+                "bce_logits_smooth",
+                "ce",
+                "focal_loss",
+                "bpr",
+                "ranknet",
+                "lambdarank",
             }
             if loss_function in logit_losses:
                 y_scores = torch.sigmoid(all_logits).numpy()
@@ -565,6 +580,7 @@ def compute_roc_auc(
 # ---------------------------------------------------------------------------
 # Evaluate orchestrator
 # ---------------------------------------------------------------------------
+
 
 def run_evaluate(
     task_dir: str,
@@ -618,14 +634,19 @@ def run_evaluate(
         logger.info("  rows=%d", len(df_raw))
         logger.info("Preprocessing ...")
         df_processed, dataset = preprocess_raw_data(
-            df_raw, project_config, index_mapping,
+            df_raw,
+            project_config,
+            index_mapping,
         )
     else:
         # Re-eval: find the test CSV from the data preparation task
         data_source = "test_split"
         logger.info("Locating test split from training run ...")
         df_processed, dataset = _load_test_split(
-            task_dir, params, project_config, index_mapping,
+            task_dir,
+            params,
+            project_config,
+            index_mapping,
         )
 
     n_samples = len(dataset)
@@ -635,11 +656,16 @@ def run_evaluate(
     max_k = max(ranking_k)
     logger.info(
         "Running inference (batch_size=%d, k=%d, device=%s)",
-        batch_size, max_k, device,
+        batch_size,
+        max_k,
+        device,
     )
 
     all_logits, all_targets = _collect_logits_and_targets(
-        model, dataset, batch_size=batch_size, device=device,
+        model,
+        dataset,
+        batch_size=batch_size,
+        device=device,
     )
     top_k_indices, top_k_scores = _topk_from_logits(all_logits, max_k)
 
@@ -664,7 +690,9 @@ def run_evaluate(
     gt_items = df_processed[item_col].astype(str).tolist()
 
     ranking_metrics = compute_ranking_metrics(
-        gt_items, sorted_actions_list, ks=ranking_k,
+        gt_items,
+        sorted_actions_list,
+        ks=ranking_k,
     )
 
     if ranking_metrics:
@@ -709,6 +737,7 @@ def run_evaluate(
 # Helpers for re-eval mode
 # ---------------------------------------------------------------------------
 
+
 def _load_test_split(
     task_dir: str,
     params: dict,
@@ -720,7 +749,6 @@ def _load_test_split(
     The file lives under the dataset output directory with a naming
     convention produced by the data-preparation Luigi task.
     """
-    from mars_rec.utils.files import OUTPUT_PATH
 
     # Resolve the dataset directory from the data preparation task
     task_cls = project_config.prepare_data_frames_task
@@ -787,6 +815,7 @@ def _topk_from_logits(
 # BCE catalog scoring (per-row × candidate expansion)
 # ---------------------------------------------------------------------------
 
+
 def score_candidates_emb(
     model: nn.Module,
     df_processed: pd.DataFrame,
@@ -818,12 +847,10 @@ def score_candidates_emb(
     Returns ``(turn_scores, eligible_per_row)`` — same format as
     ``score_candidates_bce``.
     """
-    import torch.nn.functional as F
 
     if not hasattr(model, "get_target_emb"):
         raise AttributeError(
-            "score_candidates_emb requires model.get_target_emb(track_ids). "
-            "Use score_candidates_bce for BCE/CE models."
+            "score_candidates_emb requires model.get_target_emb(track_ids). Use score_candidates_bce for BCE/CE models."
         )
 
     torch_device = torch.device(device)
@@ -854,10 +881,7 @@ def score_candidates_emb(
     with torch.no_grad():
         for x, _ in iterator:
             inputs = x if isinstance(x, (list, tuple)) else [x]
-            inputs = [
-                t.to(torch_device) if isinstance(t, torch.Tensor) else t
-                for t in inputs
-            ]
+            inputs = [t.to(torch_device) if isinstance(t, torch.Tensor) else t for t in inputs]
             emb = model(*inputs).float()  # [B, D] L2-normalised
             pred_embs_list.append(emb.cpu())
 
@@ -877,10 +901,11 @@ def score_candidates_emb(
         else:
             row = df_processed.iloc[i].to_dict()
             eligible = np.asarray(
-                candidate_provider.get_candidates(row, full_catalog), dtype=np.int64,
+                candidate_provider.get_candidates(row, full_catalog),
+                dtype=np.int64,
             )
 
-        cand_embs = all_item_embs[eligible]              # [n_cands, D]
+        cand_embs = all_item_embs[eligible]  # [n_cands, D]
         scores = (all_pred_embs[i].to(torch_device) @ cand_embs.T).cpu()  # [n_cands]
         out_scores.append(scores)
         out_eligible.append(eligible)
@@ -936,16 +961,10 @@ def score_candidates_ce(
     with torch.no_grad():
         for x, _ in iterator:
             inputs = x if isinstance(x, (list, tuple)) else [x]
-            inputs = [
-                t.to(torch_device) if isinstance(t, torch.Tensor) else t
-                for t in inputs
-            ]
+            inputs = [t.to(torch_device) if isinstance(t, torch.Tensor) else t for t in inputs]
             logits = model(*inputs)  # [B, n_items]
             if logits.dim() != 2:
-                raise ValueError(
-                    f"score_candidates_ce expects [B, n_items] logits; "
-                    f"got shape {tuple(logits.shape)}."
-                )
+                raise ValueError(f"score_candidates_ce expects [B, n_items] logits; got shape {tuple(logits.shape)}.")
             all_logits.append(logits.float().cpu())
 
     logits_all = torch.cat(all_logits, dim=0)  # [n_turns, n_items]
@@ -985,9 +1004,7 @@ def score_candidates_bce(
     index_mapping: Dict[str, Dict[Any, int]],
     full_catalog: np.ndarray,
     candidate_provider: Optional[CandidateProvider] = None,
-    candidate_feature_overrides: Optional[
-        Callable[[pd.DataFrame, np.ndarray, np.ndarray], pd.DataFrame]
-    ] = None,
+    candidate_feature_overrides: Optional[Callable[[pd.DataFrame, np.ndarray, np.ndarray], pd.DataFrame]] = None,
     batch_size: int = 4096,
     turn_batch_size: int = 32,
     device: str = "cpu",
@@ -1104,7 +1121,9 @@ def score_candidates_bce(
 
         if candidate_feature_overrides is not None:
             expanded = candidate_feature_overrides(
-                expanded, cand_array, row_offsets,
+                expanded,
+                cand_array,
+                row_offsets,
             )
 
         ds = InteractionsDataset(expanded, embeddings_for_metadata, project_config, index_mapping)
@@ -1119,10 +1138,7 @@ def score_candidates_bce(
         with torch.no_grad():
             for x, _ in loader:
                 inputs = x if isinstance(x, (list, tuple)) else [x]
-                inputs = [
-                    t.to(torch_device) if isinstance(t, torch.Tensor) else t
-                    for t in inputs
-                ]
+                inputs = [t.to(torch_device) if isinstance(t, torch.Tensor) else t for t in inputs]
                 s = model(*inputs)
                 if s.dim() > 1:
                     s = s.squeeze(-1)

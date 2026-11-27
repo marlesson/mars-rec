@@ -14,6 +14,7 @@ Dataset: https://archive.ics.uci.edu/ml/datasets/online+retail
 This was chosen over YooChoose / RetailRocket because both of those
 require Kaggle credentials — UCI hosts Online Retail openly.
 """
+
 import os
 from typing import Optional
 
@@ -27,14 +28,11 @@ OUTPUT_PATH: str = os.environ.get("OUTPUT_PATH", "output")
 BASE_DIR: str = os.path.join(OUTPUT_PATH, "online_retail")
 DATASET_DIR: str = os.path.join(BASE_DIR, "dataset")
 
-ONLINE_RETAIL_URL = (
-    "https://archive.ics.uci.edu/ml/machine-learning-databases/00352/"
-    "Online%20Retail.xlsx"
-)
+ONLINE_RETAIL_URL = "https://archive.ics.uci.edu/ml/machine-learning-databases/00352/Online%20Retail.xlsx"
 
-HISTORY_LEN: int = 8           # per-session history window
-MIN_SESSION_LEN: int = 2       # need at least 2 items to produce 1 next-item row
-MIN_ITEM_COUNT: int = 5        # drop very rare items
+HISTORY_LEN: int = 8  # per-session history window
+MIN_SESSION_LEN: int = 2  # need at least 2 items to produce 1 next-item row
+MIN_ITEM_COUNT: int = 5  # drop very rare items
 PAD_TOKEN: str = "-1"
 
 
@@ -84,9 +82,7 @@ class DownloadAndPrepareOnlineRetail(luigi.Task):
         # and the source-file row order as the tiebreaker (line-items in an
         # invoice share a date stamp).
         df = df.reset_index(drop=False).rename(columns={"index": "_row_order"})
-        df["timestamp"] = (
-            pd.to_datetime(df["InvoiceDate"]).astype("int64") // 1_000_000_000
-        ).astype(np.int64)
+        df["timestamp"] = (pd.to_datetime(df["InvoiceDate"]).astype("int64") // 1_000_000_000).astype(np.int64)
         df = df.sort_values(["InvoiceNo", "timestamp", "_row_order"]).reset_index(drop=True)
 
         session_lens = df.groupby("InvoiceNo")["StockCode"].size()
@@ -102,14 +98,13 @@ class DownloadAndPrepareOnlineRetail(luigi.Task):
                 group["timestamp"].values,
             ):
                 if prior:
-                    padded = [PAD_TOKEN] * (HISTORY_LEN - len(prior)) + [
-                        str(c) for c in prior[-HISTORY_LEN:]
-                    ]
+                    padded = [PAD_TOKEN] * (HISTORY_LEN - len(prior)) + [str(c) for c in prior[-HISTORY_LEN:]]
                     rows.append((str(invoice), str(code), int(ts), padded))
                 prior.append(code)
 
         out = pd.DataFrame(
-            rows, columns=["session_id", "stock_code", "timestamp", "history_stock_codes"],
+            rows,
+            columns=["session_id", "stock_code", "timestamp", "history_stock_codes"],
         )
         out["label"] = 1.0
         out["history_stock_codes"] = out["history_stock_codes"].apply(

@@ -5,6 +5,7 @@ Registered as the ``radam`` choice in
 Liu et al. 2019, *On the Variance of the Adaptive Learning Rate and
 Beyond* — https://arxiv.org/abs/1908.03265.
 """
+
 import torch
 import math
 
@@ -39,15 +40,9 @@ class RAdam(Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
 
         self.degenerated_to_sgd = degenerated_to_sgd
-        if (
-            isinstance(params, (list, tuple))
-            and len(params) > 0
-            and isinstance(params[0], dict)
-        ):
+        if isinstance(params, (list, tuple)) and len(params) > 0 and isinstance(params[0], dict):
             for param in params:
-                if "betas" in param and (
-                    param["betas"][0] != betas[0] or param["betas"][1] != betas[1]
-                ):
+                if "betas" in param and (param["betas"][0] != betas[0] or param["betas"][1] != betas[1]):
                     param["buffer"] = [[None, None, None] for _ in range(10)]
         defaults = dict(
             lr=lr,
@@ -121,17 +116,13 @@ class RAdam(Optimizer):
 
                 if N_sma >= 5:
                     if group["weight_decay"] != 0:
-                        p_data_fp32.add_(
-                            -group["weight_decay"] * group["lr"], p_data_fp32
-                        )
+                        p_data_fp32.add_(-group["weight_decay"] * group["lr"], p_data_fp32)
                     denom = exp_avg_sq.sqrt().add_(group["eps"])
                     p_data_fp32.addcdiv_(-step_size * group["lr"], exp_avg, denom)
                     p.data.copy_(p_data_fp32)
                 elif step_size > 0:
                     if group["weight_decay"] != 0:
-                        p_data_fp32.add_(
-                            -group["weight_decay"] * group["lr"], p_data_fp32
-                        )
+                        p_data_fp32.add_(-group["weight_decay"] * group["lr"], p_data_fp32)
                     p_data_fp32.add_(-step_size * group["lr"], exp_avg)
                     p.data.copy_(p_data_fp32)
 

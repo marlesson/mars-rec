@@ -8,6 +8,7 @@ against an expected base class — the same machinery that makes
 ``project`` and ``recommender_module_class`` work in
 :class:`SupervisedModelTraining`.
 """
+
 import importlib
 import inspect
 from typing import Type, TypeVar, Set
@@ -18,6 +19,7 @@ except ImportError:
     # in 3.7, GenericMeta doesn't exist but we don't need it
     class GenericMeta(type):
         pass
+
 
 T = TypeVar("T")
 
@@ -53,8 +55,4 @@ def load_attr(attr_path: str, expected_type: Type[T]) -> T:
 
 def get_attribute_names(class_: Type) -> Set[str]:
     """Return the set of non-routine attribute names declared on ``class_``."""
-    return set(
-        list(zip(*(inspect.getmembers(class_, lambda a: not (inspect.isroutine(a))))))[
-            0
-        ]
-    )
+    return set(list(zip(*(inspect.getmembers(class_, lambda a: not (inspect.isroutine(a))))))[0])

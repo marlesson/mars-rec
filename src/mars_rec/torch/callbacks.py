@@ -1,4 +1,5 @@
 """Reusable PyTorch Lightning callbacks for the framework's training loop."""
+
 from __future__ import annotations
 
 import pytorch_lightning as pl
@@ -31,9 +32,7 @@ class DynamicNegativeMiningCallback(pl.Callback):
     def _inject(self, dataloader, model, device) -> None:
         if dataloader is None:
             return
-        candidates = (
-            dataloader if isinstance(dataloader, (list, tuple)) else [dataloader]
-        )
+        candidates = dataloader if isinstance(dataloader, (list, tuple)) else [dataloader]
         for dl in candidates:
             ds = getattr(dl, "dataset", None)
             if ds is None:

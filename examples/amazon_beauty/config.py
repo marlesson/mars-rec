@@ -7,12 +7,18 @@ sample time via the item index. This is the right pattern any time you
 have a dense per-item feature (text embedding, image embedding, …) that
 would otherwise blow up the interaction CSV.
 """
+
 from mars_rec.data.dataset import InteractionsWithNegativeItemGenerationDataset
 from mars_rec.meta_config import (
-    ProjectConfig, Column, IOType, RecommenderType,
+    ProjectConfig,
+    Column,
+    IOType,
+    RecommenderType,
 )
 from examples.amazon_beauty.data import (
-    BASE_DIR, PrepareAmazonBeautyDataFrame, TEXT_EMB_DIM,
+    BASE_DIR,
+    PrepareAmazonBeautyDataFrame,
+    TEXT_EMB_DIM,
 )
 
 amazon_beauty = ProjectConfig(
