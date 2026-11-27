@@ -124,14 +124,9 @@ install-locked:
 
 ## Audit pinned dependencies for known CVEs.
 ## Reads requirements.lock so it audits exactly what ships in the image.
-##
-## Acknowledged but unfixed upstream:
-##   CVE-2025-69872 (diskcache 5.6.3) — no patched release available;
-##                   only used internally by `cuda.py` for the device pool.
 audit:
 	$(PIP) install pip-audit
-	$(PYTHON) -m pip_audit -r requirements.lock --strict \
-		--ignore-vuln CVE-2025-69872
+	$(PYTHON) -m pip_audit -r requirements.lock --strict
 
 test:
 	$(PYTEST) $(TESTS)

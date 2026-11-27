@@ -30,16 +30,12 @@ dependencies = [
     "scipy>=1.13",
     "pandas>=2.2",
     "matplotlib>=3.8",
-    "seaborn>=0.13",
     "torch>=2.4",
     "pytorch-lightning>=2.4,<3",
     "scikit-learn>=1.5",
-    "imbalanced-learn>=0.13",
-    "tensorboardx>=2.6",
     "tqdm>=4.65,<5",
-    "requests>=2.31,<3",
-    "diskcache>=5.6",
-    "psutil>=6.0,<8",
+    # CA bundle for HTTPS dataset downloads (mars_rec.utils.download).
+    "certifi>=2024.2.2",
     "click>=8.1",
     # parquet I/O for `mars-rec predict` / `evaluate --data *.parquet`.
     "pyarrow>=15",
@@ -52,6 +48,11 @@ dev = [
     # Pinned to a minor series: formatter output can change between minors.
     # Keep in sync with .pre-commit-config.yaml and .github/workflows/ci.yml.
     "ruff>=0.17,<0.18",
+]
+# TensorBoard logging during training (Lightning TensorBoardLogger backend).
+# Without it, runs log to CSV only (history.csv is unaffected).
+tensorboard = [
+    "tensorboardx>=2.6",
 ]
 # Documentation site (MkDocs Material + mkdocstrings). See `make docs-serve`.
 docs = [

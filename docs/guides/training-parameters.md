@@ -74,9 +74,9 @@ For the `forward()` output shape each loss expects, see [Models](../concepts/mod
 | `dataset_split_method` | `time` | `time`, `holdout`, `column`, `k_fold` (see [Pipeline](../concepts/pipeline.md#2-data-preparation)) |
 | `n_splits` / `split_index` | `5` / `0` | K-fold configuration |
 | `negative_proportion` | `0.0` | Negatives sampled per positive by the dataset class |
-| `sampling_strategy` | `none` | `none`, `oversample`, `undersample` |
+| `sampling_strategy` | `none` | `none`, `oversample` (add rows drawn with replacement until classes reach the majority size), `undersample` (keep a random subset down to the minority size) |
 | `balance_fields` | `[]` | Columns to balance on (defaults to `ProjectConfig.default_balance_fields`) |
-| `sampling_proportions` | `{}` | Per-class target proportions |
+| `sampling_proportions` | `{}` | Per-class target proportions, as `{field: {class: proportion}}` |
 | `use_sampling_in_validation` | `False` | Also balance the validation split |
 | `eq_filters` / `neq_filters` / `isin_filters` | `{}` | Row filters applied before the split |
 | `sample_size` | `-1` | Subsample the raw data (`-1` keeps all) |

@@ -10,7 +10,7 @@ flowchart TD
     C["3 · SupervisedModelTraining"]
     C --> C1["build index_mapping"]
     C1 --> C2["instantiate RecommenderModule<br/>inside RecommenderLightningModule"]
-    C2 --> C3["train with PyTorch Lightning<br/>EarlyStopping · Checkpoint · CSV / TensorBoard"]
+    C2 --> C3["train with PyTorch Lightning<br/>EarlyStopping · Checkpoint · CSV (+ TensorBoard)"]
     C3 --> C4["evaluate on validation"]
     C4 --> C5["predict on test<br/>optional ranking metrics + ROC-AUC"]
     C5 --> C6["write artifacts<br/>weights.ckpt · history.csv · params.json · metadata.json · architecture.svg"]

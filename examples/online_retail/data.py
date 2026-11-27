@@ -41,27 +41,14 @@ class DownloadAndPrepareOnlineRetail(luigi.Task):
         return luigi.LocalTarget(os.path.join(DATASET_DIR, "online_retail_sessions.csv"))
 
     def run(self):
-        import math
-
-        import requests
-        from tqdm import tqdm
+        from mars_rec.utils.download import download_file
 
         os.makedirs(DATASET_DIR, exist_ok=True)
 
         xlsx_path = os.path.join(DATASET_DIR, "Online Retail.xlsx")
         if not os.path.exists(xlsx_path):
             print(f"Downloading Online Retail from {ONLINE_RETAIL_URL}...")
-            r = requests.get(ONLINE_RETAIL_URL, stream=True)
-            total = int(r.headers.get("content-length", 0))
-            block = 1024
-            with open(xlsx_path, "wb") as f:
-                for chunk in tqdm(
-                    r.iter_content(block),
-                    total=math.ceil(total / block) if total else 0,
-                    unit="KB",
-                    unit_scale=True,
-                ):
-                    f.write(chunk)
+            download_file(ONLINE_RETAIL_URL, xlsx_path)
 
         print("Reading xlsx (this takes ~30s)...")
         df = pd.read_excel(xlsx_path, engine="openpyxl")

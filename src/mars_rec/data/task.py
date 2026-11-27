@@ -15,19 +15,16 @@ multi-file or zip-based downloads typically write their own
 
 import abc
 import itertools
-import math
 import os
 from typing import List, Tuple, Dict, Optional
 
 import luigi
 import numpy as np
 import pandas as pd
-import requests
 import random
-from imblearn.over_sampling import RandomOverSampler
-from imblearn.under_sampling import RandomUnderSampler
 from sklearn.model_selection import train_test_split, StratifiedKFold
-from tqdm import tqdm
+
+from mars_rec.utils.download import download_file
 
 
 class BaseDownloadDataset(luigi.Task, metaclass=abc.ABCMeta):
@@ -36,8 +33,9 @@ class BaseDownloadDataset(luigi.Task, metaclass=abc.ABCMeta):
     Subclasses implement :meth:`output` (return a ``LocalTarget``
     pointing at the destination path) and :attr:`url` (the source
     URL). The default :meth:`run` streams the response with a tqdm
-    progress bar and raises ``ConnectionError`` if the byte count does
-    not match the ``Content-Length`` header.
+    progress bar (see :func:`mars_rec.utils.download.download_file`),
+    raises on HTTP errors and raises ``ConnectionError`` if the byte
+    count does not match the ``Content-Length`` header.
 
     Most real projects bypass this class because they fetch zip files
     or multiple resources — the BaseDownloadDataset is kept for the
@@ -55,24 +53,7 @@ class BaseDownloadDataset(luigi.Task, metaclass=abc.ABCMeta):
 
     def run(self):
         """Stream the URL to ``self.output().path`` with a progress bar."""
-        r = requests.get(self.url, stream=True)
-        output_path = self.output().path
-
-        total_size = int(r.headers.get("content-length", 0))
-        block_size = 1024
-        wrote = 0
-        os.makedirs(os.path.split(output_path)[0], exist_ok=True)
-        with open(output_path, "wb") as f:
-            for data in tqdm(
-                r.iter_content(block_size),
-                total=math.ceil(total_size // block_size),
-                unit="KB",
-                unit_scale=True,
-            ):
-                wrote = wrote + len(data)
-                f.write(data)
-        if total_size != 0 and wrote != total_size:
-            raise ConnectionError("ERROR, something went wrong")
+        download_file(self.url, self.output().path)
 
 
 class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
@@ -85,7 +66,7 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
     - applying ``eq_filters`` / ``neq_filters`` / ``isin_filters``,
     - splitting into train / val / test (random, time-based, column-
       stratified or k-fold),
-    - optional over/under-sampling via ``imbalanced-learn``,
+    - optional random over/under-sampling of ``balance_fields``,
     - writing the three split CSVs to ``dataset_dir`` with hashed
       file names so the cache survives parameter changes.
 
@@ -296,9 +277,9 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         - ``val_size > 0``: carves out a validation set from the
           remaining train rows, with the strategy chosen by
           ``dataset_split_method`` (holdout / column / time / k-fold).
-        - If ``sampling_strategy != "none"``: applies over/under-
-          sampling on train (and optionally val) via the
-          ``imbalanced-learn`` samplers.
+        - If ``sampling_strategy != "none"``: applies random over/under-
+          sampling on train (and optionally val), see
+          :meth:`balance_dataset`.
         """
         if self.test_size:
             if self.test_split_type == "random":
@@ -453,28 +434,71 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
     def balance_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply over- or under-sampling on ``df`` for each ``balance_fields`` entry.
 
-        Iterates the configured ``balance_fields`` and resamples row
-        indices using ``RandomOverSampler`` / ``RandomUnderSampler``
-        from imbalanced-learn. Sampling proportions can be customised
-        per field through the ``sampling_proportions`` DictParameter.
+        Iterates the configured ``balance_fields`` and resamples rows per
+        class of that field (same semantics as imbalanced-learn's
+        ``RandomOverSampler`` / ``RandomUnderSampler``, which this replaces):
+
+        - ``"oversample"`` keeps every row and adds rows drawn with
+          replacement; by default each class grows to the majority class size.
+        - ``"undersample"`` keeps a random subset without replacement;
+          by default each class shrinks to the minority class size.
+
+        Per-class target sizes can be customised per field through the
+        ``sampling_proportions`` DictParameter (see
+        :meth:`_create_sampling_strategy`); classes missing from those
+        targets are left untouched. Fields are processed in order, each one
+        on the output of the previous. Draws are seeded by ``seed``.
         Returns ``df`` unchanged when ``sampling_strategy`` is ``"none"``.
         """
-        sampler = dict(oversample=RandomOverSampler, undersample=RandomUnderSampler)
-
-        random_sampler_cls = sampler.get(self.sampling_strategy)
-
-        if random_sampler_cls is None:
+        if self.sampling_strategy not in ("oversample", "undersample"):
             return df
-        index_resampled = df.index
-        for balance_field in self.balance_fields:
-            random_sampler = random_sampler_cls(
-                sampling_strategy=self._create_sampling_strategy(df, balance_field),
-                random_state=self.seed,
-            )
-            index_resampled, _ = random_sampler.fit_resample(
-                np.array(index_resampled).reshape(-1, 1),
-                df.loc[index_resampled][balance_field],
-            )
-            index_resampled = index_resampled.flatten()
 
-        return df.loc[index_resampled]
+        rng = np.random.default_rng(self.seed)
+        positions = np.arange(len(df))
+        for balance_field in self.balance_fields:
+            labels = df[balance_field].to_numpy()[positions]
+            positions = self._resample_positions(
+                positions,
+                labels,
+                self._create_sampling_strategy(df, balance_field),
+                rng,
+            )
+        return df.iloc[positions]
+
+    def _resample_positions(self, positions: np.ndarray, labels: np.ndarray, strategy, rng) -> np.ndarray:
+        """Resample ``positions`` (row positions into the DataFrame) by class of ``labels``.
+
+        ``strategy`` is ``"auto"`` or a ``{class: target_size}`` dict, as
+        returned by :meth:`_create_sampling_strategy`.
+        """
+        values, counts = np.unique(labels, return_counts=True)
+        if isinstance(strategy, str):  # "auto": balance every class
+            target = counts.max() if self.sampling_strategy == "oversample" else counts.min()
+            strategy = {value: int(target) for value in values}
+        members = {value: np.flatnonzero(labels == value) for value in values}
+
+        if self.sampling_strategy == "oversample":
+            extra = []
+            for value, target_size in strategy.items():
+                class_members = members.get(value, np.empty(0, dtype=int))
+                n_new = int(target_size) - len(class_members)
+                if n_new < 0 or (n_new > 0 and len(class_members) == 0):
+                    raise ValueError(
+                        f"Cannot oversample class {value!r} from {len(class_members)} to {target_size} rows"
+                    )
+                if n_new:
+                    extra.append(rng.choice(class_members, size=n_new, replace=True))
+            return np.concatenate([positions] + [positions[e] for e in extra])
+
+        kept = []
+        for value in values:
+            class_members = members[value]
+            if value in strategy:
+                target_size = int(strategy[value])
+                if target_size > len(class_members):
+                    raise ValueError(
+                        f"Cannot undersample class {value!r} from {len(class_members)} to {target_size} rows"
+                    )
+                class_members = rng.choice(class_members, size=target_size, replace=False)
+            kept.append(class_members)
+        return positions[np.concatenate(kept)]

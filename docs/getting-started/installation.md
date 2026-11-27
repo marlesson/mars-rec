@@ -16,6 +16,12 @@ pip install -e .          # the package + the `mars-rec` CLI
 make install-dev          # package + dev tools (pytest, ruff)
 ```
 
+Optional extras:
+
+```bash
+pip install -e ".[tensorboard]"   # TensorBoard logging during training (CSV logging is always on)
+```
+
 Check that the installation works:
 
 ```bash
@@ -46,8 +52,11 @@ For more on the lockfile and how to upgrade it, see [Dependencies](../guides/dep
 | `luigi >= 3.5, < 4` | Pipeline orchestration and caching |
 | `pandas >= 2.2` | Data manipulation (pandas 3.x is supported) |
 | `scikit-learn >= 1.5` | Splits and metrics |
-| `imbalanced-learn >= 0.13` | Over/undersampling |
+| `matplotlib >= 3.8` | Training plots (history, scores, ROC/PR, confusion matrix) |
 | `pyarrow >= 15` | Parquet I/O for `predict` / `evaluate` |
+| `click`, `tqdm`, `certifi` | CLI, progress bars, CA bundle for dataset downloads |
+
+TensorBoard logging is optional: install the `tensorboard` extra to enable it.
 
 ## `PYTHONPATH`
 
