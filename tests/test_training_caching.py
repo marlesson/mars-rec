@@ -107,3 +107,79 @@ class TestIndexMappingReuse:
         monkeypatch.setattr(SupervisedModelTraining, "get_data_frame_for_indexing", _must_not_read)
 
         assert set(task.index_mapping) == set(mapping)
+
+
+class _DoublingModel:
+    """Stand-in for a trained RecommenderModule: score = 2 * input."""
+
+    def to(self, device):
+        return self
+
+    def eval(self):
+        return self
+
+    def recommendation_score(self, x):
+        return x.float() * 2
+
+
+class _ArrayDataset:
+    """Batch-indexed dataset in the shape ``InteractionsDataset`` returns."""
+
+    def __init__(self, n):
+        import numpy as np
+
+        self.x = np.arange(n, dtype=np.int64)
+        self.y = (np.arange(n) % 2).astype(np.float32)
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, idx):
+        return (self.x[idx],), self.y[idx]
+
+
+class TestTrainedModuleSharing:
+    def _patched_task(self, monkeypatch):
+        from mars_rec.simulation.training import SupervisedModelTraining
+
+        loads = []
+
+        def _fake_load(self):
+            loads.append(1)
+            return _DoublingModel()
+
+        monkeypatch.setattr(SupervisedModelTraining, "get_trained_module", _fake_load)
+        return _task(batch_size=3, generator_workers=0), loads
+
+    def test_checkpoint_loaded_once(self, monkeypatch):
+        task, loads = self._patched_task(monkeypatch)
+        assert task._get_cached_trained_module() is task._get_cached_trained_module()
+        assert len(loads) == 1
+
+    def test_forward_runs_once_per_dataset(self, monkeypatch):
+        task, _ = self._patched_task(monkeypatch)
+        dataset = _ArrayDataset(7)
+        calls = []
+        model = task._get_cached_trained_module()
+        original = model.recommendation_score
+        model.recommendation_score = lambda x: calls.append(1) or original(x)
+
+        scores, targets = task._forward_dataset(dataset)
+        again = task._forward_dataset(dataset)
+
+        assert again[0] is scores and again[1] is targets
+        assert len(calls) == 3  # ceil(7 / batch_size=3) batches, one pass only
+        assert scores.tolist() == [2.0 * i for i in range(7)]
+        assert targets.tolist() == [float(i % 2) for i in range(7)]
+
+        task._forward_dataset(_ArrayDataset(7))  # a different dataset is scored again
+        assert len(calls) == 6
+
+    def test_cache_cleanup_releases_model_and_forward(self, monkeypatch):
+        task, loads = self._patched_task(monkeypatch)
+        task._forward_dataset(_ArrayDataset(4))
+        task.cache_cleanup()
+        assert not hasattr(task, "_cached_trained_module")
+        assert not hasattr(task, "_cached_dataset_forward")
+        task._get_cached_trained_module()
+        assert len(loads) == 2
