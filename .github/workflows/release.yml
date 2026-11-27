@@ -1,0 +1,86 @@
+name: Release
+
+# Publishes mars-rec to PyPI when a version tag (e.g. v0.1.0) is pushed.
+# Uses PyPI Trusted Publishing (OIDC): no API token is stored in the repo.
+# One-time setup on pypi.org: add a (pending) trusted publisher with
+#   owner=marlesson, repository=mars-rec, workflow=release.yml, environment=pypi
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Check that the tag matches mars_rec.__version__
+        run: |
+          version=$(python -c "import re, pathlib; print(re.search(r'^__version__ = \"(.+)\"', pathlib.Path('src/mars_rec/__init__.py').read_text(), re.M).group(1))")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$tag version=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match __version__ = $version"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: |
+          pip install build twine
+          python -m build
+          twine check --strict dist/*
+
+      - name: Smoke-test the wheel
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu dist/*.whl
+          cd /tmp
+          /tmp/smoke/bin/mars-rec --help
+          /tmp/smoke/bin/python -c "import mars_rec; from mars_rec.simulation.training import SupervisedModelTraining; print(mars_rec.__version__)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mars-rec/
+    permissions:
+      id-token: write  # Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

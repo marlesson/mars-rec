@@ -2,6 +2,16 @@
 
 MARS-Rec supports **Python 3.11 – 3.13**.
 
+## From PyPI
+
+```bash
+pip install mars-rec                  # the package + the `mars-rec` CLI
+pip install "mars-rec[tensorboard]"   # with TensorBoard logging
+```
+
+This is the way to go when you use MARS-Rec as a library in your own project. The bundled
+`examples/` are not part of the wheel; clone the repository to run them.
+
 ## From source
 
 ```bash

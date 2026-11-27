@@ -93,7 +93,7 @@ scripts/
 
 tests/                      # Pytest suite (test_dataset, test_loss, test_metrics, test_meta_config, ...)
 CONTRIBUTING.md             # Branch / lint / PR workflow
-.github/                    # CI + Docs workflows, Dependabot, PR template
+.github/                    # CI + Docs + Release (PyPI, on v* tags) workflows, Dependabot, PR template
 Makefile                    # Development / Docker / Vertex AI targets (`make lint` = ruff check + format --check)
 Dockerfile                  # CPU/GPU image (default base: pytorch/pytorch:2.14.1-cuda12.6)
 entrypoint.sh               # Container entrypoint (dataset download, Vertex AI artifact upload)
