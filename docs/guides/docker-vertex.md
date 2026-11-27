@@ -46,6 +46,15 @@ make vertex-run ARGS="--project examples.movielens.config.movielens \
   --epochs 10 --batch-size 256 --device cuda --no-cache"
 ```
 
+`ARGS` is split like a shell command line, so wrap JSON-valued options in single quotes:
+
+```bash
+make vertex-run ARGS="--project examples.movielens100k_slate.config.movielens100k_slate \
+  --recommender-module-class examples.movielens100k_slate.model.ML100KSlateRanker \
+  --recommender-extra-params '{\"n_factors\": 32, \"genre_dim\": 19, \"hidden_size\": 64}' \
+  --loss-function bce_logits --epochs 2 --device cuda"
+```
+
 | Variable | Default | Description |
 |---|---|---|
 | `MACHINE_TYPE` | `g2-standard-4` | Vertex machine type |

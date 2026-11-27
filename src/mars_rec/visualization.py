@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import glob
 import html
+import itertools
 import json
 import logging
 import os
@@ -611,6 +612,13 @@ def _build_synthetic_batch(
     return inputs
 
 
+def _module_device(model: nn.Module) -> Optional[torch.device]:
+    """Device of the first parameter (or buffer) of ``model``, if it has any."""
+    for tensor in itertools.chain(model.parameters(), model.buffers()):
+        return tensor.device
+    return None
+
+
 def trace_model_shapes(
     model: nn.Module,
     project_config: ProjectConfig,
@@ -620,10 +628,17 @@ def trace_model_shapes(
 ) -> Dict[str, Any]:
     """Run a forward pass and capture per-module input/output shapes.
 
+    The synthetic batch is created on the device of the model's own
+    parameters; ``device`` is only used for a model without parameters or
+    buffers. Training calls this before Lightning moves the model to the
+    accelerator, so with ``device="cuda"`` the model is still on the CPU and
+    CUDA inputs would fail every trace.
+
     Returns ``{"shapes": {name: {"in": [...], "out": ...}}, "order": [...],
     "error": str_or_None}``. On error, returns whatever was captured up to
     the failure point.
     """
+    device = _module_device(model) or device
     inputs = _build_synthetic_batch(
         project_config,
         index_mapping,

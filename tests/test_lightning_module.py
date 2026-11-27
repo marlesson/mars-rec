@@ -268,3 +268,27 @@ class TestEmbeddingLightningModule:
         track_ids = torch.tensor([1, 2])
         lit._shared_step((track_ids, track_ids), stage="train")
         assert call_arities == [2]
+
+
+class TestFirstBatchLog:
+    def test_first_training_batch_shapes_go_to_the_logger_once(self, caplog, capsys, monkeypatch):
+        module = _IdentityModule()
+        lit = RecommenderLightningModule(
+            module=module,
+            optimizer=torch.optim.SGD(module.parameters(), lr=0.01),
+            loss_fn=nn.MSELoss(),
+            metric_names=[],
+            loss_name="mse",
+        )
+        monkeypatch.setattr(RecommenderLightningModule, "_step_logged", False)
+        monkeypatch.setattr(lit, "_shared_step", lambda batch, stage: torch.tensor(0.0))
+        batch = ((torch.zeros(4, 3),), torch.zeros(4))
+
+        with caplog.at_level("INFO", logger="mars_rec.torch.lightning_module"):
+            lit.training_step(batch, 0)
+            lit.training_step(batch, 1)
+
+        messages = [r.getMessage() for r in caplog.records if r.name == "mars_rec.torch.lightning_module"]
+        assert len(messages) == 1
+        assert "input_shapes=[torch.Size([4, 3])]" in messages[0]
+        assert "[DIAG]" not in capsys.readouterr().out  # no stray print to stdout
