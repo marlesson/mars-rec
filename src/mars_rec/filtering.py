@@ -247,17 +247,10 @@ class CompositeProvider(CandidateProvider):
         # Since eligible == full_catalog[mask], the relative order is preserved
         # and we just need to know each eligible item's position in full_catalog
         # to index full-catalog-shaped score arrays.
-        # We reuse np.isin + searchsorted: full_catalog is sorted by construction.
-        # Safer: compute the mask once and reuse it.
+        # A boolean mask over full_catalog handles both the masked and the
+        # min_pool-fallback (full catalog) cases (np.in1d removed in numpy 2.x).
         n_full = len(full_catalog)
-        elig_set = set(int(x) for x in eligible.tolist())
-        if len(elig_set) == len(eligible):
-            # Build a boolean mask over full_catalog indicating eligible
-            # positions; np.isin handles both the masked and min_pool-fallback
-            # (full catalog) cases (np.in1d removed in numpy 2.x).
-            keep = np.isin(full_catalog, eligible)
-        else:
-            keep = np.isin(full_catalog, eligible)
+        keep = np.isin(full_catalog, eligible)
 
         scored: List[np.ndarray] = []
         for f in all_filters:
@@ -286,9 +279,7 @@ class CompositeProvider(CandidateProvider):
             # No score signal and no popularity → preserve catalog order.
             fused = -np.arange(n_eligible, dtype=np.float64)
 
-        k = min(int(top_k), n_eligible)
-        if k <= 0:
-            return np.asarray([], dtype=np.int64)
+        k = min(int(top_k), n_eligible)  # >= 1: both checked above
         # argpartition for speed; then sort the top-K slice desc.
         if k >= n_eligible:
             order = np.argsort(-fused, kind="stable")
