@@ -104,3 +104,14 @@ def test_ssl_cert_file_overrides_the_bundle(monkeypatch, tmp_path):
     )
     monkeypatch.setenv("SSL_CERT_FILE", str(custom))
     assert download._ssl_context().cert_store_stats()["x509_ca"] == 1
+
+
+def test_downloaded_file_gets_regular_permissions(tmp_path, server_url):
+    """mkstemp creates 0600 files; the result must look like a normal open() did it."""
+    import os
+
+    out = tmp_path / "data.csv"
+    download_file(f"{server_url}/ok", str(out), show_progress=False)
+    reference = tmp_path / "reference"
+    reference.write_bytes(b"")
+    assert oct(os.stat(out).st_mode & 0o777) == oct(os.stat(reference).st_mode & 0o777)

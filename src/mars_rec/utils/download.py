@@ -33,6 +33,12 @@ def _ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context(cafile=os.environ.get("SSL_CERT_FILE") or certifi.where())
 
 
+def _current_umask() -> int:
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
 def download_file(url: str, output_path: str, timeout: Optional[float] = 60.0, show_progress: bool = True) -> str:
     """Download ``url`` to ``output_path`` and return ``output_path``.
 
@@ -85,6 +91,8 @@ def download_file(url: str, output_path: str, timeout: Optional[float] = 60.0, s
                     raise ConnectionError(f"Incomplete download from {url}: {e}") from e
         if total and wrote != total:
             raise ConnectionError(f"Incomplete download from {url}: got {wrote} of {total} bytes")
+        # mkstemp creates the file as 0600; give it the permissions a plain open() would.
+        os.chmod(tmp_path, 0o666 & ~_current_umask())
         shutil.move(tmp_path, output_path)
     except BaseException:
         if os.path.exists(tmp_path):
