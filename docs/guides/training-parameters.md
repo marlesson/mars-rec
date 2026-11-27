@@ -76,7 +76,7 @@ For the `forward()` output shape each loss expects, see [Models](../concepts/mod
 | `negative_proportion` | `0.0` | Negatives sampled per positive by the dataset class |
 | `sampling_strategy` | `none` | `none`, `oversample` (add rows drawn with replacement until classes reach the majority size), `undersample` (keep a random subset down to the minority size) |
 | `balance_fields` | `[]` | Columns to balance on (defaults to `ProjectConfig.default_balance_fields`) |
-| `sampling_proportions` | `{}` | Per-class target proportions, as `{field: {class: proportion}}` |
+| `sampling_proportions` | `{}` | Per-class target proportions, as `{field: {class: proportion}}`. Class keys may be JSON strings (`{"label": {"0": 0.25, "1": 0.75}}`); classes left out are not resampled |
 | `use_sampling_in_validation` | `False` | Also balance the validation split |
 | `eq_filters` / `neq_filters` / `isin_filters` | `{}` | Row filters applied before the split |
 | `sample_size` | `-1` | Subsample the raw data (`-1` keeps all) |

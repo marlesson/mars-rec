@@ -22,7 +22,7 @@ import luigi
 import numpy as np
 import pandas as pd
 import random
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 
 from mars_rec.utils.download import download_file
 
@@ -313,16 +313,20 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
 
         Default behaviour: when the column named by
         ``available_items_column_name`` is absent, attach a list of up
-        to 99 randomly sampled items plus the row's positive item.
+        to 99 randomly sampled items plus the row's positive item. The
+        draw is seeded with ``seed``, so the same parameters always
+        produce the same slates (training-time ranking metrics use them
+        as the candidate pool).
 
         Override in the subclass to skip this entirely (return early)
         or to build the slate from a domain-specific source (popularity
         cohort, same-genre items, etc.).
         """
         if self.available_items_column_name not in df.columns:
+            rng = random.Random(self.seed)
 
             def add_items(item, item_unique):
-                items = random.sample(item_unique, min(99, len(item_unique)))
+                items = rng.sample(item_unique, min(99, len(item_unique)))
                 items.append(item)
                 items = np.unique(items).tolist()
                 return items
@@ -343,22 +347,21 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         return df
 
     def kfold_split(self, df) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """K-fold stratified split returning the ``split_index``-th fold.
+        """K-fold split returning the ``split_index``-th fold.
 
-        Uses ``sklearn.model_selection.StratifiedKFold`` with
-        ``n_splits`` and ``stratification_property``.
+        Uses ``sklearn.model_selection.StratifiedKFold`` on
+        ``stratification_property`` when it is set, and a plain shuffled
+        ``KFold`` otherwise.
         """
-        skf = StratifiedKFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
-        train_indices, val_indices = next(
-            itertools.islice(
-                skf.split(
-                    df,
-                    df[self.stratification_property] if self.stratification_property else None,
-                ),
-                self.split_index,
-                self.split_index + 1,
-            )
-        )
+        if not 0 <= self.split_index < self.n_splits:
+            raise ValueError(f"split_index must be in [0, n_splits={self.n_splits}); got {self.split_index}")
+        if self.stratification_property:
+            splitter = StratifiedKFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
+            folds = splitter.split(df, df[self.stratification_property])
+        else:
+            splitter = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
+            folds = splitter.split(df)
+        train_indices, val_indices = next(itertools.islice(folds, self.split_index, self.split_index + 1))
         train_df, test_df = df.iloc[train_indices], df.iloc[val_indices]
         return train_df, test_df
 
@@ -409,25 +412,37 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         )
 
     def _create_sampling_strategy(self, df: pd.DataFrame, balance_field: str):
+        """Per-class target sizes for ``balance_field``, or ``"auto"``.
+
+        Classes without an entry in ``sampling_proportions[balance_field]``
+        are omitted, so :meth:`balance_dataset` leaves them untouched.
+        """
         if balance_field in self.sampling_proportions:
+            proportions = self.sampling_proportions[balance_field]
             field_unique_values, counts = np.unique(df[balance_field], return_counts=True)
+
+            def proportion_of(field_value):
+                # Keys from the CLI / params.json are JSON strings, while the
+                # column may hold ints (e.g. a 0/1 label): accept both.
+                for key in (field_value, str(field_value)):
+                    if key in proportions:
+                        return proportions[key]
+                return None
+
+            targeted = {value: proportion_of(value) for value in field_unique_values}
+            targeted = {value: proportion for value, proportion in targeted.items() if proportion is not None}
+
             if self.sampling_strategy == "oversample":
                 min_num_samples = max(counts)
-                min_proportion = min(self.sampling_proportions[balance_field].values())
+                min_proportion = min(proportions.values())
                 return {
-                    field_value: int(
-                        self.sampling_proportions[balance_field][field_value] * min_num_samples / min_proportion
-                    )
-                    for field_value in field_unique_values
+                    value: int(proportion * min_num_samples / min_proportion) for value, proportion in targeted.items()
                 }
             elif self.sampling_strategy == "undersample":
                 max_num_samples = min(counts)
-                max_proportion = max(self.sampling_proportions[balance_field].values())
+                max_proportion = max(proportions.values())
                 return {
-                    field_value: int(
-                        self.sampling_proportions[balance_field][field_value] * max_num_samples / max_proportion
-                    )
-                    for field_value in field_unique_values
+                    value: int(proportion * max_num_samples / max_proportion) for value, proportion in targeted.items()
                 }
         return "auto"
 
