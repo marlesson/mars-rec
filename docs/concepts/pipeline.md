@@ -26,7 +26,7 @@ Any Luigi task that produces a file works. The bundled examples download public 
 [`BasePrepareDataFrames`][mars_rec.data.task.BasePrepareDataFrames] reads the raw DataFrame and:
 
 1. Applies `eq_filters`, `neq_filters` and `isin_filters`, in that order.
-2. Creates the `available_items` column when it is missing.
+2. Creates the `available_items` column when it is missing (seeded by `seed`, so slates are reproducible).
 3. Splits the data into **train / validation / test**:
     - **Test** split (`test_size`, default `0.2`): `test_split_type=random` (default) or `time`.
     - **Validation** split (`val_size`, default `0.2`, carved from the remaining train rows), using
@@ -37,7 +37,7 @@ Any Luigi task that produces a file works. The bundled examples download public 
         | `time` (default) | Sort by `timestamp_property`. The most recent slice becomes validation |
         | `holdout` | Random split |
         | `column` | Partition the unique values of `column_stratification` (e.g. all rows of a user stay on one side) |
-        | `k_fold` | Stratified K-fold (`n_splits`, `split_index`) |
+        | `k_fold` | K-fold (`n_splits`, `split_index`), stratified on `stratification_property` when the task defines one |
 
 4. Optionally balances train (and validation) with `sampling_strategy=oversample|undersample`.
 5. Calls `transform_data_frame(df, data_key)` on each split and writes the three CSVs.
