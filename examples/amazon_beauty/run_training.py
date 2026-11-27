@@ -47,13 +47,13 @@ if __name__ == "__main__":
     if success:
         print("\n" + "=" * 60)
         print("Amazon Beauty two-tower training completed!")
-        print(f"Output dir: {task.output().path}")
+        print(f"Output dir: {task.task_dir}")
         print("=" * 60)
 
         import pandas as pd
         from mars_rec.utils.files import get_history_path
 
-        history_path = get_history_path(task.output().path)
+        history_path = get_history_path(task.task_dir)
         if os.path.exists(history_path):
             history = pd.read_csv(history_path)
             print("\nTraining History:")

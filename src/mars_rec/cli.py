@@ -97,8 +97,10 @@ def _get_results_dir():
 
 def _load_run(run_dir):
     """Load metadata for a single training run."""
-    params_path = os.path.join(run_dir, "params.json")
-    history_path = os.path.join(run_dir, "history.csv")
+    from mars_rec.utils.files import get_history_path, get_metadata_path, get_params_path
+
+    params_path = get_params_path(run_dir)
+    history_path = get_history_path(run_dir)
 
     if not os.path.exists(params_path):
         return None
@@ -124,7 +126,7 @@ def _load_run(run_dir):
             best_metrics["total_epochs"] = int(last["epoch"]) + 1
 
     # Load ranking metrics from metadata.json (computed post-training)
-    metadata_path = os.path.join(run_dir, "metadata.json")
+    metadata_path = get_metadata_path(run_dir)
     if os.path.exists(metadata_path):
         with open(metadata_path) as f:
             metadata = json.load(f)
@@ -564,7 +566,9 @@ def visualize(model_dir, task_id, mode, output, trace, device):
         return
 
     if output is None:
-        output = os.path.join(model_dir, "architecture.svg")
+        from mars_rec.utils.files import get_architecture_path
+
+        output = get_architecture_path(model_dir)
 
     rendered = generate_architecture_diagram(
         model,

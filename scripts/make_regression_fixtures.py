@@ -44,6 +44,7 @@ from tests._fixtures.regression import (  # noqa: E402
     score_fixed_input,
     stack_versions,
 )
+from mars_rec.utils import files  # noqa: E402
 
 
 def main() -> None:
@@ -69,9 +70,9 @@ def main() -> None:
         task = build_training_task()
         task.requires().run()
         task.run()
-        out = Path(task.output().path).resolve()
+        out = str(Path(task.task_dir).resolve())
 
-        history = pd.read_csv(out / "history.csv")
+        history = pd.read_csv(files.get_history_path(out))
     finally:
         os.chdir(cwd)
 
@@ -80,8 +81,15 @@ def main() -> None:
         if LEGACY_DIR.exists():
             shutil.rmtree(LEGACY_DIR)
         LEGACY_DIR.mkdir(parents=True)
-        for name in ("params.json", "index_mapping.pkl", "weights.ckpt"):
-            shutil.copy2(out / name, LEGACY_DIR / name)
+        # The fixture keeps the flat, pre-reorganisation file names on purpose:
+        # it is what artifacts trained by older versions look like.
+        sources = {
+            "params.json": files.get_params_path(out),
+            "index_mapping.pkl": files.get_index_mapping_path(out),
+            "weights.ckpt": files.find_checkpoint(out),
+        }
+        for name, src in sources.items():
+            shutil.copy2(src, LEGACY_DIR / name)
 
         scores = score_fixed_input(str(LEGACY_DIR))
         with open(LEGACY_DIR / "expected_scores.json", "w") as f:

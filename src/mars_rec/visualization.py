@@ -27,7 +27,6 @@ Models can override the role/heuristic system by implementing::
 
 from __future__ import annotations
 
-import glob
 import html
 import itertools
 import json
@@ -44,7 +43,7 @@ import torch
 import torch.nn as nn
 
 from mars_rec.meta_config import Column, IOType, ProjectConfig
-from mars_rec.utils.files import get_params
+from mars_rec.utils.files import find_checkpoint, get_index_mapping_path, get_params
 from mars_rec.utils.reflection import load_attr
 
 logger = logging.getLogger(__name__)
@@ -1449,7 +1448,7 @@ def load_model_from_task(
 
     project_config: ProjectConfig = deepcopy(load_attr(project_path, ProjectConfig))
 
-    idx_path = os.path.join(task_dir, "index_mapping.pkl")
+    idx_path = get_index_mapping_path(task_dir)
     with open(idx_path, "rb") as f:
         index_mapping = pickle.load(f)
 
@@ -1461,9 +1460,8 @@ def load_model_from_task(
     )
 
     if load_weights:
-        ckpt_files = glob.glob(os.path.join(task_dir, "weights*.ckpt"))
-        if ckpt_files:
-            ckpt_path = max(ckpt_files, key=os.path.getmtime)
+        ckpt_path = find_checkpoint(task_dir)
+        if ckpt_path is not None:
             checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
             state_dict = {k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()}
             model.load_state_dict(state_dict)

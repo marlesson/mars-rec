@@ -111,13 +111,28 @@ from mars_rec.torch.loss import (
 from mars_rec.torch.optimizer import RAdam
 from mars_rec.torch.summary import summary
 from mars_rec.utils.files import (
-    get_params_path,
-    get_params,
+    CHECKPOINT_NAME,
+    DEFAULT_EVAL_NAME,
+    find_checkpoint,
+    get_architecture_path,
+    get_eval_dir,
+    get_eval_plot_path,
+    get_eval_results_path,
     get_history_path,
-    get_tensorboard_logdir,
-    get_task_dir,
-    get_test_set_predictions_path,
     get_index_mapping_path,
+    get_metadata_path,
+    get_model_dir,
+    get_params,
+    get_params_path,
+    get_plot_history_path,
+    get_sample_train_keys_path,
+    get_sample_train_path,
+    get_sample_train_scores_path,
+    get_summary_path,
+    get_task_dir,
+    get_tensorboard_logdir,
+    get_test_set_predictions_path,
+    get_training_logs_dir,
 )
 from mars_rec.utils.index_mapping import (
     create_index_mapping,
@@ -254,8 +269,8 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             if hasattr(target, "path") and os.path.exists(target.path):
                 os.remove(target.path)
         # Invalidate own output
-        if self.output().exists():
-            shutil.rmtree(self.output().path, ignore_errors=True)
+        if os.path.exists(self.task_dir):
+            shutil.rmtree(self.task_dir, ignore_errors=True)
 
     @property
     def cache_attrs(self):
@@ -297,8 +312,13 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             **self.data_frames_preparation_extra_params,
         )
 
+    @property
+    def task_dir(self) -> str:
+        """Directory this run writes its artifacts to (see :mod:`mars_rec.utils.files`)."""
+        return get_task_dir(self.__class__, self.task_id)
+
     def output(self):
-        return luigi.LocalTarget(get_task_dir(self.__class__, self.task_id))
+        return luigi.LocalTarget(self.task_dir)
 
     @property
     def project_config(self) -> ProjectConfig:
@@ -307,7 +327,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         return self._project_config
 
     def _save_params(self):
-        with open(get_params_path(self.output().path), "w") as params_file:
+        with open(get_params_path(self.task_dir), "w") as params_file:
             json.dump(self.param_kwargs, params_file, default=lambda o: dict(o), indent=4)
 
     @property
@@ -583,7 +603,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         self.index_mapping
 
     def run(self):
-        os.makedirs(self.output().path, exist_ok=True)
+        os.makedirs(self.task_dir, exist_ok=True)
 
         self.seed_everything()
         self.before_run()
@@ -592,7 +612,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         try:
             self.train()
         except Exception:
-            shutil.rmtree(self.output().path)
+            shutil.rmtree(self.task_dir)
             raise
         finally:
             gc.collect()
@@ -744,7 +764,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         val_loader = self.get_val_generator()
         module = self.create_module()
 
-        summary_path = os.path.join(self.output().path, "summary.txt")
+        summary_path = get_summary_path(self.task_dir)
         with open(summary_path, "w") as summary_file:
             with redirect_stdout(summary_file):
                 sample_input = self.get_sample_batch()
@@ -760,7 +780,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             replace=True,
             random_state=int(self.seed),
         )
-        sample_data.to_csv(os.path.join(self.output().path, "sample_train.csv"))
+        sample_data.to_csv(get_sample_train_path(self.task_dir))
 
         # Companion artifact: raw (pre-indexing) values of the project-declared
         # sample_keys_columns, sliced at the same sample_idx so each row in
@@ -774,7 +794,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             sample_keys = self._train_data_frame_raw_keys.loc[sample_data.index].copy()
             sample_keys.insert(0, "row_idx", range(len(sample_keys)))
             sample_keys.to_csv(
-                os.path.join(self.output().path, "sample_train_keys.csv"),
+                get_sample_train_keys_path(self.task_dir),
                 index=False,
             )
 
@@ -794,7 +814,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 module,
                 self.project_config,
                 viz_params,
-                os.path.join(self.output().path, "architecture.svg"),
+                get_architecture_path(self.task_dir),
                 index_mapping=self.index_mapping,
                 trace=True,
                 device=self.device,
@@ -813,7 +833,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
 
         self._convert_history_csv(trainer)
 
-        history_df = pd.read_csv(get_history_path(self.output().path))
+        history_df = pd.read_csv(get_history_path(self.task_dir))
 
         model_name = self.recommender_module_class.split(".")[-1]
         plot_meta = self._plot_metadata()
@@ -824,7 +844,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             extra_info=plot_meta,
         )
         history_fig.savefig(
-            os.path.join(self.output().path, "plot_history.jpg"),
+            get_plot_history_path(self.task_dir),
             dpi=150,
             bbox_inches="tight",
         )
@@ -856,7 +876,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         register the training run and replicate the experiment."""
         from datetime import datetime, timezone
 
-        output_dir = self.output().path
+        output_dir = self.task_dir
         train_duration = time.time() - getattr(self, "_train_start_time", time.time())
 
         # --- Model info ---
@@ -973,7 +993,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             "artifacts": artifacts,
         }
 
-        metadata_path = os.path.join(output_dir, "metadata.json")
+        metadata_path = get_metadata_path(output_dir)
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2, default=str)
         logger.info("Metadata saved → %s", metadata_path)
@@ -991,10 +1011,10 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         """The actual task directory on disk.
 
         When a task is reconstructed for re-evaluation, Luigi may compute
-        a different ``task_id`` hash, so ``output().path`` may not match
+        a different ``task_id`` hash, so :attr:`task_dir` may not match
         the real directory. Set ``_source_task_dir`` to override.
         """
-        return getattr(self, "_source_task_dir", None) or self.output().path
+        return getattr(self, "_source_task_dir", None) or self.task_dir
 
     @property
     def eval_output_dir(self) -> str:
@@ -1003,7 +1023,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         Defaults to ``source_task_dir``, but can be overridden via
         ``_eval_output_dir`` for external-data evaluation.
         """
-        return getattr(self, "_eval_output_dir", None) or self.source_task_dir
+        return getattr(self, "_eval_output_dir", None) or get_eval_dir(self.source_task_dir, DEFAULT_EVAL_NAME)
 
     def _evaluate_on_dataloader(self, dataloader: DataLoader) -> Dict[str, Any]:
         """Run Lightning validation on any dataloader and return metrics dict."""
@@ -1130,8 +1150,10 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         callbacks = [
             *self._get_extra_callbacks(),
             ModelCheckpoint(
-                dirpath=self.output().path,
-                filename="weights",
+                dirpath=get_model_dir(self.task_dir),
+                filename=CHECKPOINT_NAME,
+                # Always overwrite ``weights.ckpt`` instead of writing ``weights-v1.ckpt``.
+                enable_version_counter=False,
                 save_top_k=1,
                 monitor=self.monitor_metric,
                 mode=self.monitor_mode,
@@ -1157,7 +1179,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
 
     def _get_loggers(self):
         # CSVLogger is the source of ``history.csv`` and always runs.
-        loggers = [CSVLogger(save_dir=self.output().path, name="lightning_logs", version="")]
+        loggers = [CSVLogger(save_dir=get_training_logs_dir(self.task_dir), name="lightning_logs", version="")]
         # TensorBoard logging is optional (``pip install "mars-rec[tensorboard]"``):
         # Lightning's TensorBoardLogger needs ``tensorboard`` or ``tensorboardX``.
         if _tensorboard_available():
@@ -1204,7 +1226,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         if "step" in epoch_df.columns:
             epoch_df = epoch_df.drop(columns=["step"])
 
-        epoch_df.to_csv(get_history_path(self.output().path), index=False)
+        epoch_df.to_csv(get_history_path(self.task_dir), index=False)
 
     def get_trained_module(self) -> nn.Module:
         """Rebuild the model and load the best ``weights*.ckpt`` of this run, in eval mode.
@@ -1231,17 +1253,9 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         module.eval()
         return module
 
-    def _find_best_checkpoint(self) -> str:
-        """Find the best Lightning checkpoint file."""
-        task_dir = self.source_task_dir
-        # Lightning ModelCheckpoint saves as weights.ckpt (or weights-v1.ckpt, etc.)
-        import glob as glob_module
-
-        ckpt_files = glob_module.glob(os.path.join(task_dir, "weights*.ckpt"))
-        if ckpt_files:
-            # Return the most recently modified
-            return max(ckpt_files, key=os.path.getmtime)
-        return None
+    def _find_best_checkpoint(self) -> Optional[str]:
+        """Find the best Lightning checkpoint file (see :func:`~mars_rec.utils.files.find_checkpoint`)."""
+        return find_checkpoint(self.source_task_dir)
 
     def _save_sample_train_scores(self) -> None:
         """Score the 100 rows in ``sample_train.csv`` with the trained model
@@ -1259,7 +1273,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         ``sample_train.csv`` is not present (e.g. ``run()`` aborted before
         the sample was written).
         """
-        sample_path = os.path.join(self.output().path, "sample_train.csv")
+        sample_path = get_sample_train_path(self.task_dir)
         if not os.path.exists(sample_path):
             return
 
@@ -1310,7 +1324,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 len(df_sample),
             )
 
-        out_path = os.path.join(self.output().path, "sample_train_scores.csv")
+        out_path = get_sample_train_scores_path(self.task_dir)
         pd.DataFrame(
             {
                 "row_idx": list(range(len(all_scores))),
@@ -1584,7 +1598,7 @@ class SupervisedModelTraining(TorchModelTraining):
             extra_info=self._plot_metadata(),
         )
         fig.savefig(
-            os.path.join(self.eval_output_dir, "plot_scores.png"),
+            get_eval_plot_path(self.eval_output_dir, "scores"),
             dpi=150,
             bbox_inches="tight",
         )
@@ -1686,7 +1700,7 @@ class SupervisedModelTraining(TorchModelTraining):
             task_id=self.task_id,
             extra_info=meta,
         )
-        fig.savefig(os.path.join(out_dir, "plot_confusion_matrix.png"), dpi=150, bbox_inches="tight")
+        fig.savefig(get_eval_plot_path(out_dir, "confusion_matrix"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # ROC Curve
@@ -1697,7 +1711,7 @@ class SupervisedModelTraining(TorchModelTraining):
             task_id=self.task_id,
             extra_info=meta,
         )
-        fig.savefig(os.path.join(out_dir, "plot_roc_curve.png"), dpi=150, bbox_inches="tight")
+        fig.savefig(get_eval_plot_path(out_dir, "roc_curve"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # Precision-Recall Curve
@@ -1708,7 +1722,7 @@ class SupervisedModelTraining(TorchModelTraining):
             task_id=self.task_id,
             extra_info=meta,
         )
-        fig.savefig(os.path.join(out_dir, "plot_precision_recall_curve.png"), dpi=150, bbox_inches="tight")
+        fig.savefig(get_eval_plot_path(out_dir, "precision_recall_curve"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
     @property
@@ -2340,14 +2354,14 @@ def run_evaluate(
             results["roc_auc_metrics"] = getattr(task, "_roc_auc_metrics", {})
 
     # --- Save results ---
-    eval_results_path = os.path.join(effective_output_dir, "eval_results.json")
+    eval_results_path = get_eval_results_path(effective_output_dir)
     with open(eval_results_path, "w") as f:
         json.dump(results, f, indent=2, default=str)
     logger.info("Eval results saved → %s", eval_results_path)
 
     # Also update metadata.json in the task dir (if saving there)
     if effective_output_dir == task_dir:
-        metadata_path = os.path.join(task_dir, "metadata.json")
+        metadata_path = get_metadata_path(task_dir)
         if os.path.exists(metadata_path):
             with open(metadata_path, "r") as f:
                 metadata = json.load(f)

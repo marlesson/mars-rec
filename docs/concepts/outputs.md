@@ -7,20 +7,34 @@ Every training run writes to `$OUTPUT_PATH/models/SupervisedModelTraining/result
 
 ```text
 <task_id>/
-├── params.json              # Every parameter of the run
-├── weights.ckpt             # PyTorch Lightning checkpoint
-├── history.csv              # Per-epoch metrics
-├── metadata.json            # Ranking + ROC-AUC metrics (when computed)
-├── index_mapping.pkl        # Categorical → index mapping (needed for inference)
-├── test_set_predictions.csv # Test-set scores and ranking
-├── architecture.svg         # Model architecture diagram (traced shapes)
-├── summary.txt              # Layer / parameter summary
-├── plot_history.jpg         # Training curves
-├── plot_scores.png          # Prediction score distribution
-├── sample_train.csv         # A sample of the training data
-└── lightning_logs/
-    └── metrics.csv          # Raw per-step metrics
+├── params.json                  # Every parameter of the run
+├── metadata.json                # Run summary + ranking / ROC-AUC metrics (when computed)
+├── weights.ckpt                 # PyTorch Lightning checkpoint (best epoch)
+├── index_mapping.pkl            # Categorical → index mapping (needed for inference)
+├── architecture.svg             # Model architecture diagram (traced shapes)
+├── summary.txt                  # Layer / parameter summary
+├── history.csv                  # Per-epoch metrics
+├── plot_history.jpg             # Training curves
+├── lightning_logs/
+│   └── metrics.csv              # Raw per-step metrics
+├── sample_train.csv             # 100 training rows (after indexing)
+├── sample_train_keys.csv        # Raw key columns of those rows (when the project declares them)
+├── sample_train_scores.csv      # Model logits for those rows
+├── test_set_predictions.csv     # Test-set scores and ranking
+├── plot_scores.png              # Prediction score distribution
+├── plot_confusion_matrix.png    # Binary targets only
+├── plot_roc_curve.png           # Binary targets only
+├── plot_precision_recall_curve.png
+└── eval_results.json            # Written by `mars-rec evaluate`
 ```
+
+Every path is built by a helper in [`mars_rec.utils.files`](../reference/api/utils.md), so code that
+needs an artifact should call those helpers (`get_params_path`, `find_checkpoint`, …) rather than
+joining file names onto the task directory.
+
+TensorBoard logs (with `mars-rec[tensorboard]`) go to `$OUTPUT_PATH/tensorboard_logs/<task_id>/`,
+outside the task directory, so a single `tensorboard --logdir $OUTPUT_PATH/tensorboard_logs`
+compares every run.
 
 `mars-rec list` and `mars-rec results` read `params.json`, `history.csv` and `metadata.json` from
 these directories.
