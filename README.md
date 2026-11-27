@@ -687,6 +687,10 @@ make vertex-run ARGS="--project examples.movielens.config.movielens \
 
 Run `make help` to list all targets.
 
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the branch, lint and pull request workflow.
+
 ## License
 
 MIT

@@ -3,6 +3,7 @@ PIP    = $(PYTHON) -m pip
 PYTEST = $(PYTHON) -m pytest
 SRC    = src/mars_rec
 TESTS  = tests
+LINT_PATHS = $(SRC) $(TESTS) examples scripts
 
 # -------------------------------------------------------------------------
 # Local overrides via .env (gitignored). Copy .env.example to .env and edit.
@@ -42,7 +43,7 @@ help:
 	@echo "  Development:"
 	@echo "    install        Install package (editable)"
 	@echo "    install-dev    Install package + dev dependencies"
-	@echo "    lock           Regenerate requirements.lock from setup.py"
+	@echo "    lock           Regenerate requirements.lock from pyproject.toml"
 	@echo "    audit          Audit pinned dependencies for known CVEs"
 	@echo "    test           Run tests"
 	@echo "    test-v         Run tests (verbose)"
@@ -116,11 +117,12 @@ test-cov:
 	$(PYTEST) $(TESTS) --cov=$(SRC) --cov-report=term-missing --cov-report=html
 
 lint:
-	$(PYTHON) -m ruff check $(SRC) $(TESTS)
+	$(PYTHON) -m ruff check $(LINT_PATHS)
+	$(PYTHON) -m ruff format --check $(LINT_PATHS)
 
 format:
-	$(PYTHON) -m ruff format $(SRC) $(TESTS)
-	$(PYTHON) -m ruff check --fix $(SRC) $(TESTS)
+	$(PYTHON) -m ruff check --fix $(LINT_PATHS)
+	$(PYTHON) -m ruff format $(LINT_PATHS)
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null; \

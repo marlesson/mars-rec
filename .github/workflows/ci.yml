@@ -1,40 +1,57 @@
 name: CI
 
 on:
-  pull_request:
+  push:
     branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"  # weekly dependency audit (Mondays 06:00 UTC)
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  test:
+  lint:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: make install-dev
-
-      - name: Run tests
-        run: make test
-
-  audit:
-    runs-on: ubuntu-latest
-    needs: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Audit locked dependencies
-        run: |
-          pip install pip-audit
-          pip-audit -r requirements.lock --strict \
-            --ignore-vuln CVE-2025-69872  # diskcache: no upstream fix yet
+      - run: pip install "ruff>=0.17,<0.18"
+      - run: make lint
+
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest and newest supported versions.
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install dependencies (CPU-only torch)
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e ".[dev]"
+      - name: Run tests
+        run: make test
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: make audit

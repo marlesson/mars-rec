@@ -1,0 +1,50 @@
+# Contributing to MARS-Rec
+
+Thanks for your interest in contributing! This guide keeps the workflow short and predictable.
+
+## Setup
+
+```bash
+git clone https://github.com/marlesson/mars-rec.git
+cd mars-rec
+python -m venv .venv && source .venv/bin/activate
+make install-dev
+```
+
+Optional: run lint automatically on every commit with `pip install pre-commit && pre-commit install`.
+
+## Workflow
+
+1. `main` is protected; every change goes through a pull request with green CI.
+2. Create a short-lived branch from `main` using a type prefix:
+   `feat/…`, `fix/…`, `docs/…`, `refactor/…`, `test/…`, `chore/…`, `ci/…`.
+3. Before pushing, run:
+   ```bash
+   make format   # autofix + format with ruff
+   make lint     # what CI checks
+   make test
+   ```
+4. Open a PR against `main` and fill in the template.
+5. PRs are **squash-merged**. The PR title becomes the commit message on `main`, so write it in
+   [Conventional Commits](https://www.conventionalcommits.org/) style, e.g. `feat: add MAP@k metric`
+   or `fix(inference): handle empty candidate pool`.
+
+## Guidelines
+
+- All code, comments, docs, commit messages and PR descriptions are written in **English**.
+- `src/mars_rec/` must stay domain-agnostic: no hard-coded column names, dataset names or
+  competition-specific logic. Application code belongs in a separate project that depends on `mars-rec`.
+- Add or update tests under `tests/` for any behavior change. Mark heavyweight end-to-end tests with
+  `@pytest.mark.slow`.
+- If you change dependencies in `pyproject.toml`, regenerate the lockfile with `make lock` and commit it.
+- See [`AGENTS.md`](AGENTS.md) for architecture details and the critical files to modify with care.
+
+## CI
+
+Every PR and every push to `main` runs:
+
+| Job | What it does |
+|---|---|
+| `lint` | `ruff check` + `ruff format --check` on `src`, `tests`, `examples`, `scripts` |
+| `test` | `pytest` on Python 3.10 and 3.13 (CPU-only torch) |
+| `audit` | `pip-audit` on `requirements.lock` (also runs weekly) |
