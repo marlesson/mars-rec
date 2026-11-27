@@ -32,8 +32,7 @@ BASE_IMAGE    ?= pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-dev install-locked lock lock-upgrade audit test test-v test-cov lint format clean docs docs-serve \
-
+.PHONY: help install install-dev install-locked lock lock-upgrade audit test test-v test-cov test-ci lint format clean docs docs-serve \
         docker-build docker-run docker-run-data docker-test docker-push docker-pull \
         gcp-setup gcp-create-repo gcp-submit vertex-run \
         vertex-list-jobs vertex-download-model \
