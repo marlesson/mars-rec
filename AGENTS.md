@@ -282,6 +282,9 @@ user-facing behavior (CLI options, training parameters, `ProjectConfig` fields, 
 the matching page under `docs/` in the same PR. The API reference is generated from docstrings, so keep
 docstring parameters in sync with signatures — the strict build fails on mismatches. The example
 tutorials include source files via `--8<--` snippets, so they never need manual syncing.
+`CONTRIBUTING.md` is also included into the site (`docs/contributing.md`), so links in it must be absolute
+GitHub URLs — a relative link such as `(AGENTS.md)` fails the strict build. Publishing to GitHub Pages is
+opt-in via the `DOCS_DEPLOY` repository variable (a Pages site is public even for a private repo).
 
 ## Critical files (modify with care)
 
