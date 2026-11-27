@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+.eggs
+
+# Virtual environments
+.venv
+venv
+.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test/CI artifacts
+.pytest_cache
+htmlcov
+.coverage
+.tox
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large data files (mount at runtime instead)
+output/
+*.parquet
+*.csv
+
+# Example docs (not needed at runtime)
+examples/**/*.md
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Secrets / credentials (never bake into images)
+.env
+.env.*
+*-credentials.json
+service-account*.json
+*.key
+*.pem
+*.p12
+*.pfx

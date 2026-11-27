@@ -1,0 +1,68 @@
+# Cloud Build context exclusions — mirror runtime image needs only.
+# Without this, gcloud falls back to .gitignore which misses workspace-only dirs.
+
+# Git
+.git
+.gitignore
+.gcloudignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.local/
+.claude/
+
+# Logs
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Test/CI artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+.tox/
+
+# Local datasets / outputs / caches (huge — must NOT enter Docker context)
+output/
+output_*/
+checkpoints/
+logs/
+.hf_cache/
+**/.hf_cache/
+
+# Docs / state files at root (not needed in image). Anchored with `/`
+# so nested project files are not excluded.
+/*.json
+/*_results.md
+
+# Secrets
+.env
+.env.*
+*-credentials.json
+service-account*.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Large data files at root
+/*.parquet
+/*.csv
+/*.tar
+/*.tar.gz
+/*.tgz
+/*.zip

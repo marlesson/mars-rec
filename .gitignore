@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+dist/
+env/
+venv/
+ENV/
+*.egg-info/
+.eggs/
+*.egg
+
+# Conda
+*.conda
+*.condarc
+.conda/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Jupyter
+.ipynb_checkpoints
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.bak
+
+# Output folders
+output/
+
+# Python bytecode cache
+src/mars_rec/**/__pycache__/
+examples/**/__pycache__/
+.local
+.pytest_cache/
+.claude
+checkpoints/
+
+# Secrets / credentials (never commit)
+.env
+.env.*
+!.env.example
+*-credentials.json
+service-account*.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Training artifacts that may embed identifiers
+lightning_logs/
+mlruns/
+logs/
+output_v8/
