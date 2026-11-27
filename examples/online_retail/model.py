@@ -53,10 +53,11 @@ class OnlineRetailGRU4Rec(RecommenderModule):
         target_ids = args[1]
         history_ids = args[2]
 
-        # Build a length per row from the PAD positions so the final hidden
-        # state reflects only the real items, not padding. History is
-        # LEFT-padded, so the last position is always real for non-empty
-        # histories.
+        # History is LEFT-padded, so the last GRU step always reads a real
+        # item and its hidden state is used as the session representation.
+        # PAD steps (zero vectors via ``padding_idx``) are still fed to the
+        # GRU; for variable-length handling use
+        # ``nn.utils.rnn.pack_padded_sequence`` with per-row lengths.
         h_seq = self.item_emb(history_ids)
         h_seq = self.dropout(h_seq)
         out, _ = self.gru(h_seq)  # (B, L, H)

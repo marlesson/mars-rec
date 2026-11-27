@@ -59,7 +59,7 @@ Optional hooks:
 
 - `metadata_data_frame_path` returns the path to a per-item metadata CSV (for `metadata_columns`);
 - `stratification_property` sets the column to stratify on for random test splits;
-- `create_available_items(df)` lets you override or skip the creation of the `available_items` slate column.
+- `create_available_items(df)` lets you build the `available_items` slate column from your own source. It is skipped automatically when the `ProjectConfig` sets `available_items_column_name=None`.
 
 ## 2. Declare the `ProjectConfig`
 

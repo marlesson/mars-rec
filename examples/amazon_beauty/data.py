@@ -7,6 +7,12 @@ review text) are stored once in a separate metadata CSV and looked up
 by item index at sample time, instead of repeating the vector in every
 interaction row.
 
+The item "documents" are built only from reviews written before the
+validation/test period (``TEXT_FIT_FRACTION``). The split is temporal, so
+using every review would leak future text into the item features. Items
+with no review before the cutoff get an all-zero vector, which is exactly
+the cold-start situation the text-only item tower is designed for.
+
 Dataset: https://snap.stanford.edu/data/web-Amazon.html
 - ~198K reviews of ~12K beauty products (5-core: each user/item has >=5)
 - Fields used: reviewerID (user), asin (item), summary, overall (rating)
@@ -34,6 +40,10 @@ REVIEWS_URL = "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/
 TEXT_EMB_DIM: int = 64
 MIN_USER_REVIEWS: int = 5
 MIN_ITEM_REVIEWS: int = 5
+# Share of the reviews (oldest first) whose text may feed the item embedding.
+# Keep it <= (1 - test_size) * (1 - val_size) of run_training.py
+# (0.9 * 0.9 = 0.81) so no validation/test review text is used.
+TEXT_FIT_FRACTION: float = 0.8
 
 METADATA_PATH = os.path.join(DATASET_DIR, "beauty_item_metadata.csv")
 
@@ -91,14 +101,24 @@ class DownloadAndPrepareAmazonBeauty(luigi.Task):
         print(f"  reviews={len(df)} users={df['reviewerID'].nunique()} items={df['asin'].nunique()}")
 
         # Build per-item text by concatenating review text for each asin —
-        # this gives an item-level "document" for the TF-IDF model.
+        # this gives an item-level "document" for the TF-IDF model. Only the
+        # oldest TEXT_FIT_FRACTION of reviews is used (see module docstring);
+        # items first reviewed after the cutoff get an empty document.
+        cutoff_ts = df["unixReviewTime"].sort_values().iloc[int(len(df) * TEXT_FIT_FRACTION)]
+        past = df[df["unixReviewTime"] < cutoff_ts]
         item_text = (
-            df.groupby("asin")["text"]
+            past.groupby("asin")["text"]
             .apply(lambda s: " ".join(s.values)[:5000])  # cap to keep TF-IDF fast
+            .reindex(df["asin"].unique(), fill_value="")
+            .rename_axis("asin")
             .reset_index()
         )
+        n_cold = int((item_text["text"] == "").sum())
 
-        print(f"Fitting TF-IDF + SVD({TEXT_EMB_DIM}) over {len(item_text)} item documents...")
+        print(
+            f"Fitting TF-IDF + SVD({TEXT_EMB_DIM}) over {len(item_text)} item documents "
+            f"({len(past)} reviews before the cutoff; {n_cold} items with no prior text)..."
+        )
         vec = TfidfVectorizer(
             max_features=20_000,
             stop_words="english",
@@ -151,9 +171,6 @@ class PrepareAmazonBeautyDataFrame(BasePrepareDataFrames):
     @property
     def timestamp_property(self) -> Optional[str]:
         return "timestamp"
-
-    def create_available_items(self, df: pd.DataFrame) -> pd.DataFrame:
-        return df
 
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
         return df

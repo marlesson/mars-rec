@@ -318,10 +318,14 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         produce the same slates (training-time ranking metrics use them
         as the candidate pool).
 
-        Override in the subclass to skip this entirely (return early)
-        or to build the slate from a domain-specific source (popularity
-        cohort, same-genre items, etc.).
+        Skipped entirely when ``available_items_column_name`` is ``None``
+        or empty (``ProjectConfig(available_items_column_name=None)``), so
+        projects that sample negatives from the full catalogue need no
+        override. Override in the subclass to build the slate from a
+        domain-specific source (popularity cohort, same-genre items, etc.).
         """
+        if not self.available_items_column_name:
+            return
         if self.available_items_column_name not in df.columns:
             rng = random.Random(self.seed)
 

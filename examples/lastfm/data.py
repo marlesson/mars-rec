@@ -151,10 +151,5 @@ class PrepareLastFMDataFrame(BasePrepareDataFrames):
     def timestamp_property(self) -> Optional[str]:
         return "timestamp"
 
-    def create_available_items(self, df: pd.DataFrame) -> pd.DataFrame:
-        # negatives are sampled randomly from all items by the dataset_class —
-        # no per-row candidate slate needed.
-        return df
-
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
         return df
