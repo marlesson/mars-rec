@@ -9,11 +9,11 @@ flowchart TD
     B["2 · BasePrepareDataFrames subclass<br/>filter → split → balance → train/val/test CSVs"] --> C
     C["3 · SupervisedModelTraining"]
     C --> C1["build index_mapping + datasets"]
-    C1 --> C2["create_module()<br/>summary.txt · sample_train.csv · architecture.svg"]
+    C1 --> C2["create_module()<br/>model/summary.txt · model/architecture.svg · training/samples/"]
     C2 --> C3["trainer.fit() in RecommenderLightningModule<br/>EarlyStopping · Checkpoint · CSV (+ TensorBoard)"]
-    C3 --> C4["after_fit(): score the test split<br/>test_set_predictions.csv · optional ranking metrics + ROC-AUC"]
+    C3 --> C4["after_fit(): score the test split<br/>eval/test/predictions.csv · optional ranking metrics + ROC-AUC"]
     C4 --> C5["evaluate(): metrics on validation"]
-    C5 --> C6["write metadata.json<br/>(weights.ckpt · history.csv · params.json already on disk)"]
+    C5 --> C6["write eval/test/metrics.json + metadata.json<br/>(model/weights.ckpt · training/history.csv · params.json already on disk)"]
 ```
 
 ## 1. Raw data
@@ -53,11 +53,12 @@ mars-rec run data examples.movielens.data PrepareMovieLensDataFrame
 [`SupervisedModelTraining`][mars_rec.simulation.training.SupervisedModelTraining] loads the CSVs,
 builds the [index mapping](index-mapping.md) and the datasets, then:
 
-1. instantiates your model and writes `summary.txt`, `sample_train.csv` and `architecture.svg`;
+1. instantiates your model and writes `model/summary.txt`, `model/architecture.svg` and the
+   `training/samples/` CSVs;
 2. wraps it in
    [`RecommenderLightningModule`][mars_rec.torch.lightning_module.RecommenderLightningModule] and
-   trains it, writing `weights.ckpt`, `history.csv` and `plot_history.jpg`;
-3. scores the test split into `test_set_predictions.csv`. With `ranking_metrics=True` it also
+   trains it, writing `model/weights.ckpt`, `training/history.csv` and `training/plot_history.jpg`;
+3. scores the test split into `eval/test/predictions.csv`. With `ranking_metrics=True` it also
    computes NDCG / HitRate / MRR / MAP @{5, 10, 20} and ROC-AUC;
 4. evaluates the configured `metrics` on the validation split;
 5. writes `metadata.json`.

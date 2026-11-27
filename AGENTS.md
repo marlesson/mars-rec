@@ -119,7 +119,8 @@ The pipeline follows this sequence orchestrated by Luigi:
    ├── Evaluates on the validation set
    ├── Generates predictions on the test set
    ├── Optional: ranking metrics (NDCG/HitRate/MRR/MAP @{5,10,20}) + ROC-AUC → metadata.json
-   └── Saves artifacts (weights.ckpt, history.csv, params.json, metadata.json, etc.)
+   └── Saves artifacts: params.json + metadata.json at the root, model/ (weights.ckpt, index_mapping.pkl, …),
+       training/ (history.csv, plots, samples) and eval/test/ (metrics.json, predictions.csv, plots/)
 ```
 
 After training, two standalone entry points reuse the same artifacts:
@@ -229,10 +230,10 @@ The CLI exposes seven commands rooted at `mars-rec`:
 | `list [--project] [--limit]` | List executed runs (date, project, model, epochs, task_id). |
 | `results [--project] [--metric] [--sort-by] [--params] [--limit]` | Compare metrics across runs; reads `params.json` + `history.csv` + `metadata.json`. |
 | `predict --task-id … --data … [--top-k] [--device]` | Standalone batch inference → `result.json` with top-k items per user. Implemented in `inference.run_inference`. |
-| `evaluate --task-id … [--data] [--metric] [--ranking-metrics] [--split]` | Re-run evaluation on original splits (Flow 1) or on an external CSV/parquet (Flow 2). Implemented in `simulation.training.run_evaluate`. Writes `metadata.json` so `list/results` pick up the new metrics. |
+| `evaluate --task-id … [--data] [--name] [--metric] [--ranking-metrics] [--split]` | Re-run evaluation on original splits (Flow 1) or on an external CSV/parquet (Flow 2). Implemented in `simulation.training.run_evaluate`. Each evaluation writes to `eval/<name>/` (`test` for Flow 1, the `--data` file stem for Flow 2); only `eval/test` refreshes `metadata.json`, which is what `list/results` read. |
 | `visualize --task-id … [--mode {svg,summary}] [--trace/--no-trace] [--output]` | Generate the architecture diagram. `svg` (default) writes a hand-rolled SVG flow diagram with role colors + feature pills + tensor shapes. `summary` prints a text table. `--trace` (default on) runs a forward pass with synthetic inputs to capture real tensor shapes via hooks. The legacy `block`/`torchviz` modes and the `--format` flag were removed in the visualization refactor — every training run now emits `architecture.svg` next to the checkpoint automatically. |
 
-All `list/results` lookups read `output/models/SupervisedModelTraining/results/<task_id>/`.
+All `list/results` lookups read `output/models/SupervisedModelTraining/results/<task_id>/`. The layout inside a task directory (`model/`, `training/`, `eval/<name>/`) is defined only in `utils/files.py` — build artifact paths with its helpers, never by joining file names; old flat-layout runs are still readable through the same helpers.
 
 ## Patterns for common modifications
 
@@ -277,7 +278,7 @@ All `list/results` lookups read `output/models/SupervisedModelTraining/results/<
 
 - `inference.py::run_inference` is the source of truth for batch top-k prediction. It loads `params.json` + `weights.ckpt` + `index_mapping.pkl`, preprocesses the input the same way training does, and writes `{top10s, user, time}` to JSON.
 - `simulation/training.py::run_evaluate` re-builds a `SupervisedModelTraining` instance from `params.json`, points it to the existing task dir (`task._source_task_dir`), and runs the same `evaluate()` method as the original training. Two flows: original splits (`data_path=None`) or external dataset.
-- Both write/refresh `metadata.json`, which is what `list` / `results` read for ranking + ROC-AUC metrics.
+- `run_evaluate` writes `eval/<name>/{metrics.json,predictions.csv,plots/}` and refreshes `metadata.json` (what `list` / `results` read for ranking + ROC-AUC metrics) only for the canonical `eval/test` evaluation, so external-data evaluations never overwrite the training-time numbers.
 
 ## Documentation
 

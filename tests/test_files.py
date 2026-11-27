@@ -3,6 +3,8 @@
 import os
 import time
 
+import pytest
+
 from mars_rec.utils import files
 
 
@@ -67,3 +69,82 @@ def test_params_and_metadata_roundtrip(tmp_path):
         f.write('{"run": {"task_id": "x"}}')
     assert files.get_params(task_dir) == {"epochs": 3}
     assert files.get_metadata(task_dir)["run"]["task_id"] == "x"
+
+
+class TestLayout:
+    def test_artifacts_are_grouped_by_consumer(self, tmp_path):
+        task_dir = str(tmp_path)
+
+        def rel(path):
+            return os.path.relpath(path, task_dir).replace(os.sep, "/")
+
+        assert rel(files.get_params_path(task_dir)) == "params.json"
+        assert rel(files.get_metadata_path(task_dir)) == "metadata.json"
+        assert rel(files.get_weights_path(task_dir)) == "model/weights.ckpt"
+        assert rel(files.get_index_mapping_path(task_dir)) == "model/index_mapping.pkl"
+        assert rel(files.get_architecture_path(task_dir)) == "model/architecture.svg"
+        assert rel(files.get_summary_path(task_dir)) == "model/summary.txt"
+        assert rel(files.get_history_path(task_dir)) == "training/history.csv"
+        assert rel(files.get_plot_history_path(task_dir)) == "training/plot_history.jpg"
+        assert rel(files.get_training_logs_dir(task_dir)) == "training"
+        assert rel(files.get_sample_train_path(task_dir)) == "training/samples/sample_train.csv"
+        eval_dir = files.get_eval_dir(task_dir)
+        assert rel(eval_dir) == "eval/test"
+        assert rel(files.get_eval_results_path(eval_dir)) == "eval/test/metrics.json"
+        assert rel(files.get_test_set_predictions_path(eval_dir)) == "eval/test/predictions.csv"
+        assert rel(files.get_eval_plot_path(eval_dir, "roc_curve")) == "eval/test/plots/roc_curve.png"
+        assert rel(files.get_eval_dir(task_dir, "holdout")) == "eval/holdout"
+
+    def test_new_layout_wins_when_both_exist(self, tmp_path):
+        task_dir = str(tmp_path)
+        _touch(os.path.join(task_dir, "history.csv"))
+        new = os.path.join(task_dir, "training", "history.csv")
+        _touch(new)
+        assert files.get_history_path(task_dir) == new
+
+
+class TestLegacyFlatLayout:
+    """Runs written before the reorganisation keep every file at the root."""
+
+    def test_reads_fall_back_to_flat_files(self, tmp_path):
+        task_dir = str(tmp_path)
+        for name in ("index_mapping.pkl", "history.csv", "architecture.svg", "summary.txt", "sample_train.csv"):
+            _touch(os.path.join(task_dir, name))
+        assert files.get_index_mapping_path(task_dir) == os.path.join(task_dir, "index_mapping.pkl")
+        assert files.get_history_path(task_dir) == os.path.join(task_dir, "history.csv")
+        assert files.get_architecture_path(task_dir) == os.path.join(task_dir, "architecture.svg")
+        assert files.get_summary_path(task_dir) == os.path.join(task_dir, "summary.txt")
+        assert files.get_sample_train_path(task_dir) == os.path.join(task_dir, "sample_train.csv")
+
+    def test_finds_flat_checkpoint(self, tmp_path):
+        flat = os.path.join(str(tmp_path), "weights-v1.ckpt")
+        _touch(flat)
+        assert files.find_checkpoint(str(tmp_path)) == flat
+
+    def test_legacy_fixture_resolves(self):
+        legacy_dir = os.path.join(os.path.dirname(__file__), "_fixtures", "legacy_artifacts")
+        assert files.find_checkpoint(legacy_dir) == os.path.join(legacy_dir, "weights.ckpt")
+        assert files.get_index_mapping_path(legacy_dir) == os.path.join(legacy_dir, "index_mapping.pkl")
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "a/b", "../x"])
+def test_eval_dir_rejects_paths_and_empty_names(tmp_path, name):
+    with pytest.raises(ValueError):
+        files.get_eval_dir(str(tmp_path), name)
+
+
+def test_ensure_parent_dir_creates_missing_dirs(tmp_path):
+    path = str(tmp_path / "a" / "b" / "c.txt")
+    assert files.ensure_parent_dir(path) == path
+    assert os.path.isdir(tmp_path / "a" / "b")
+
+
+def test_list_artifacts_is_recursive_and_relative(tmp_path):
+    _touch(str(tmp_path / "params.json"))
+    _touch(str(tmp_path / "model" / "weights.ckpt"))
+    _touch(str(tmp_path / "eval" / "test" / "plots" / "scores.png"))
+    assert files.list_artifacts(str(tmp_path)) == [
+        "eval/test/plots/scores.png",
+        "model/weights.ckpt",
+        "params.json",
+    ]

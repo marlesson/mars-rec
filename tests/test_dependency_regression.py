@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from mars_rec.utils.files import get_history_path
 from tests._fixtures.regression import SCORING_INPUT, build_training_task, score_fixed_input
 
 FIXTURES_DIR = Path(__file__).parent / "_fixtures"
@@ -119,7 +120,7 @@ class TestGoldenTrainingHistory:
         task = build_training_task()
         task.requires().run()
         task.run()
-        history = pd.read_csv(Path(task.output().path) / "history.csv")
+        history = pd.read_csv(get_history_path(task.task_dir))
 
         expected = golden["history"]
         assert list(history.columns) == list(expected.keys())

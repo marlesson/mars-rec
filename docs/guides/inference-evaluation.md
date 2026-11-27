@@ -25,8 +25,8 @@ mars-rec results --params dropout --params n_factors    # also searches recommen
 
 ## Batch prediction: `mars-rec predict`
 
-[`run_inference`][mars_rec.inference.run_inference] loads `params.json`, `weights.ckpt` and
-`index_mapping.pkl`. It preprocesses the input **the same way training does** and writes the top-k
+[`run_inference`][mars_rec.inference.run_inference] loads `params.json`, `model/weights.ckpt` and
+`model/index_mapping.pkl`. It preprocesses the input **the same way training does** and writes the top-k
 items per user:
 
 ```bash
@@ -78,9 +78,18 @@ mars-rec predict \
 
     The file must contain the target column. It is preprocessed with the training pipeline.
 
-Both flows write ranking metrics (NDCG, HitRate, MRR, MAP @{5, 10, 20}) and ROC-AUC to
-`metadata.json`, where `list` and `results` pick them up. ROC-AUC is omitted when the evaluated
-split has a single class, since it is undefined there.
+Each evaluation writes `metrics.json`, `predictions.csv` and `plots/` to its own
+`<task_id>/eval/<name>/` directory, so evaluations never overwrite one another:
+
+| Flow | Default `<name>` | Refreshes `metadata.json`? |
+|---|---|---|
+| Original splits | `test` | Yes — `list` and `results` pick the new metrics up |
+| External dataset | file name of `--data` without extension (`new_test`) | No |
+
+Pass `--name <name>` to choose the directory yourself (`test` is reserved for the original splits),
+or `--output <dir>` to write the same files somewhere else. Metrics include ranking metrics
+(NDCG, HitRate, MRR, MAP @{5, 10, 20}) and ROC-AUC; ROC-AUC is omitted when the evaluated split has
+a single class, since it is undefined there.
 
 `--prefilter` applies the project's
 [`CandidateProvider`][mars_rec.filtering.CandidateProvider] when it builds the candidate pool for
@@ -88,7 +97,7 @@ ranking metrics.
 
 ## Architecture diagram: `mars-rec visualize`
 
-Every training run already writes `architecture.svg`. To regenerate or inspect it:
+Every training run already writes `model/architecture.svg`. To regenerate or inspect it:
 
 ```bash
 mars-rec visualize --task-id <TASK_ID>                  # SVG, traced tensor shapes
