@@ -37,6 +37,7 @@ Optional: run lint automatically on every commit with `pip install pre-commit &&
 - Add or update tests under `tests/` for any behavior change. Mark heavyweight end-to-end tests with
   `@pytest.mark.slow`.
 - If you change dependencies in `pyproject.toml`, regenerate the lockfile with `make lock` and commit it.
+  To upgrade the pinned stack, follow *Upgrading dependencies* in the README.
 - See [`AGENTS.md`](AGENTS.md) for architecture details and the critical files to modify with care.
 
 ## CI
@@ -46,5 +47,6 @@ Every PR and every push to `main` runs:
 | Job | What it does |
 |---|---|
 | `lint` | `ruff check` + `ruff format --check` on `src`, `tests`, `examples`, `scripts` |
-| `test` | `pytest` on Python 3.10 and 3.13 (CPU-only torch) |
+| `test` | `pytest` on Python 3.11 and 3.13 against the pinned `requirements.lock` (CPU-only torch) |
+| `test-latest` | `pytest` on the newest versions allowed by `pyproject.toml`; non-blocking early warning |
 | `audit` | `pip-audit` on `requirements.lock` (also runs weekly) |

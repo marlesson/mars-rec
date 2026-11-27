@@ -1,0 +1,8 @@
+# Constraints applied only when compiling requirements.lock (`make lock`).
+# They do NOT change what `pip install mars-rec` accepts; pyproject.toml keeps
+# the library floors loose on purpose.
+#
+# torch: stay on a release that ships a CUDA 12.x build. The Docker image uses
+# the matching pytorch/pytorch:<ver>-cuda12.x base and the Vertex AI GPU nodes
+# do not have CUDA 13 drivers yet. torch 2.15 is published only for CUDA 13.
+torch<2.15

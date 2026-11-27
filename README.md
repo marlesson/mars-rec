@@ -22,9 +22,9 @@ MARS-Rec removes all Reinforcement Learning, bandits, gym environments, and poli
 ```
 mars-rec/
 ├── pyproject.toml                    # Package metadata, dependencies, ruff/pytest config
-├── requirements.lock                 # Pinned dependency tree (consumed by the Dockerfile)
+├── requirements.lock                 # Pinned dependency tree (Dockerfile + CI); see lock-constraints.txt
 ├── Makefile                          # Dev / Docker / Vertex AI targets
-├── Dockerfile                        # CPU/GPU image (default base: pytorch/pytorch:2.5.1-cuda12.4)
+├── Dockerfile                        # CPU/GPU image (default base: pytorch/pytorch:2.14.1-cuda12.6)
 ├── src/
 │   └── mars_rec/
 │       ├── __init__.py
@@ -93,16 +93,35 @@ pip install -e .
 - `scikit-learn >= 1.5` — Data splitting, metrics
 - `imbalanced-learn >= 0.13` — Over/undersampling for class balancing
 
-For reproducible Docker builds, the full pinned dependency tree lives in
-`requirements.lock`. Regenerate it after editing `pyproject.toml`:
+Python 3.11–3.13 is supported.
+
+For reproducible builds, the full pinned dependency tree lives in
+`requirements.lock`. It is resolved for Python 3.11 (the oldest supported
+version), so it installs on every supported version. Lock-only pins, such as
+keeping torch on a CUDA 12.x release, live in `lock-constraints.txt`.
 
 ```bash
-make lock      # rewrites requirements.lock from pyproject.toml
-make audit     # checks the lockfile against the OSV vulnerability DB
+make lock          # re-resolves requirements.lock after editing pyproject.toml
+make lock-upgrade  # bumps every package to the newest allowed version
+make audit         # checks the lockfile against the OSV vulnerability DB
+make install-locked  # installs the pinned stack + dev tools (what CI tests)
 ```
 
 Local `pip install -e .` still uses the looser floors so dev installs stay
-fast; the lockfile is only consumed by the Dockerfile.
+fast. The lockfile is consumed by the Dockerfile and by CI, which also runs a
+non-blocking job against the newest versions as an early warning.
+
+#### Upgrading dependencies
+
+1. `make lock-upgrade`, then `make install-locked`.
+2. `make test` and `make audit` must pass. `tests/test_dependency_regression.py`
+   checks that checkpoints produced by the previous stack still load and score
+   the same, and that a seeded training run stays close to its golden history.
+3. Run an example end to end, e.g.
+   `PYTHONPATH=src:. python examples/movielens100k_slate/run_training.py`.
+4. If the golden history drifted for an expected reason, review it and refresh
+   it with `PYTHONPATH=. python scripts/make_regression_fixtures.py --golden-only`. Do not
+   regenerate `tests/_fixtures/legacy_artifacts/` to silence a failure.
 
 ## Configuration
 
@@ -668,7 +687,7 @@ PYTHONPATH=src:. python examples/movielens100k_slate/run_training.py
 Common Docker and GCP workflows are exposed via the `Makefile`:
 
 ```bash
-# Build the image locally (linux/amd64; default base = pytorch/pytorch:2.5.1-cuda12.4)
+# Build the image locally (linux/amd64; default base = pytorch/pytorch:2.14.1-cuda12.6)
 make docker-build
 
 # Run a training inside the container

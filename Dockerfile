@@ -17,17 +17,29 @@
 
 # ---------------------------------------------------------------------------
 # Base image: PyTorch with CUDA support (Vertex AI compatible)
-# Using the official PyTorch image which includes CUDA runtime.
-# For CPU-only local testing, override: BASE_IMAGE=python:3.11-slim
+# Using the official PyTorch image which includes CUDA runtime. Its torch
+# release must match `torch==` in requirements.lock (kept below 2.15 by
+# lock-constraints.txt, the last release with CUDA 12.x builds, which the
+# Vertex AI GPU drivers support). The build checks this below.
+# For CPU-only local testing, override: BASE_IMAGE=python:3.12-slim
+# (torch is then installed from the PyTorch CPU index).
 #
 # NOTE: The PyTorch image is linux/amd64 only. On Apple Silicon (M1/M2/M3)
 # you MUST build with --platform linux/amd64 (handled by Makefile).
 # ---------------------------------------------------------------------------
-ARG BASE_IMAGE=pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+ARG BASE_IMAGE=pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime
 FROM --platform=linux/amd64 ${BASE_IMAGE}
 
 # Avoid interactive prompts during apt-get
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Recent pytorch/pytorch images (e.g. 2.14.1) run on Ubuntu 24.04's system
+# Python, which is marked EXTERNALLY-MANAGED (PEP 668), so a plain
+# `pip install` is refused. This image is single-purpose, so installing into
+# that interpreter is intended. Harmless on images without the marker.
+ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PIP_NO_CACHE_DIR=1
 
 # ---------------------------------------------------------------------------
 # System dependencies
@@ -64,21 +76,47 @@ WORKDIR /app
 # Layer is cache-friendly: only invalidated when the lock changes.
 # ---------------------------------------------------------------------------
 COPY requirements.lock .
-# Remove the base image's torchvision (pinned to torch 2.5.1) before installing
-# torch 2.11.0 from the lock — keeping the old torchvision triggers a circular
-# import on @register_meta when torch's API has shifted. Nothing in this
-# project uses torchvision, so the uninstall is safe.
+
+# torch comes from the base image (its CUDA build is the one that matches the
+# GPU drivers) and is never reinstalled from PyPI, whose default Linux wheel
+# may target a newer CUDA. The check fails the build when BASE_IMAGE and the
+# lock disagree, so a lock bump cannot silently ship an untested torch.
+# Pass --build-arg ALLOW_TORCH_MISMATCH=1 to build against another base on
+# purpose (e.g. rolling back to an older image).
+ARG ALLOW_TORCH_MISMATCH=0
+ARG TORCH_CPU_INDEX=https://download.pytorch.org/whl/cpu
+RUN LOCK_TORCH=$(sed -n 's/^torch==//p' requirements.lock) \
+    && if ! python -c "import torch" 2>/dev/null; then \
+         echo "Base image has no torch: installing CPU-only torch==${LOCK_TORCH}"; \
+         pip install --index-url "${TORCH_CPU_INDEX}" "torch==${LOCK_TORCH}"; \
+       fi \
+    && BASE_TORCH=$(python -c "import torch; print(torch.__version__.split('+')[0])") \
+    && echo "torch: base image=${BASE_TORCH} requirements.lock=${LOCK_TORCH}" \
+    && if [ "${BASE_TORCH}" != "${LOCK_TORCH}" ] && [ "${ALLOW_TORCH_MISMATCH}" != "1" ]; then \
+         echo "ERROR: BASE_IMAGE ships torch ${BASE_TORCH} but requirements.lock pins ${LOCK_TORCH}." >&2; \
+         echo "Use a matching pytorch/pytorch:${LOCK_TORCH}-cuda12.x base, or --build-arg ALLOW_TORCH_MISMATCH=1." >&2; \
+         exit 1; \
+       fi
+
+# Nothing in this project uses torchvision; dropping it trims the image and
+# avoids a stale torchvision breaking imports if torch is ever swapped.
 RUN pip uninstall -y torchvision || true
-# Keep the base image's torch (2.5.1+cu124) which matches the CUDA 12.4
-# runtime drivers. The lock file pins torch 2.11.0 that needs CUDA 13.x
-# drivers not yet available on Vertex AI GPU nodes. We create a constraints
-# file that pins torch to the pre-installed version so transitive deps
-# (pytorch-lightning, torchmetrics) don't pull a newer torch.
-RUN TORCH_VER=$(pip show torch 2>/dev/null | grep '^Version:' | awk '{print $2}') \
-    && echo "torch==${TORCH_VER}" > /tmp/constraints.txt \
-    && grep -v -E '^(torch==|sympy==)' requirements.lock > /tmp/reqs_no_torch.txt \
-    && pip install --no-cache-dir -c /tmp/constraints.txt -r /tmp/reqs_no_torch.txt \
-    && rm /tmp/reqs_no_torch.txt /tmp/constraints.txt
+
+# Install the rest of the lock:
+# - torch is held at the installed build by a constraint, so pytorch-lightning
+#   / torchmetrics cannot pull another one;
+# - sympy is torch's own dependency and stays at the version torch shipped with;
+# - setuptools goes in with --ignore-installed: on Ubuntu-based images the
+#   system copy is owned by apt and pip cannot uninstall it. The new copy in
+#   /usr/local takes precedence on sys.path.
+RUN echo "torch==$(pip show torch | sed -n 's/^Version: //p')" > /tmp/constraints.txt \
+    && grep -v -E '^(torch|sympy|setuptools)==' requirements.lock > /tmp/reqs.txt \
+    && pip install --ignore-installed "$(grep -E '^setuptools==' requirements.lock)" \
+    && pip install -c /tmp/constraints.txt -r /tmp/reqs.txt \
+    && rm /tmp/reqs.txt /tmp/constraints.txt
+# Report (do not fail on) dependency conflicts: the base image ships extra
+# packages (ipython, ...) whose requirements are outside this lock.
+RUN pip check || echo "WARNING: pip check reported conflicts (see above)"
 
 # ---------------------------------------------------------------------------
 # Copy source code + examples and install the package itself

@@ -1834,7 +1834,9 @@ class SupervisedModelTraining(TorchModelTraining):
                     time.time() - t1,
                 )
         ob_lengths = [len(df) for df in ob_dfs]
-        combined_df = pd.concat(ob_dfs, ignore_index=True, copy=False)
+        # No ``copy=False``: it is deprecated since pandas 3.0, where
+        # Copy-on-Write already defers the copy.
+        combined_df = pd.concat(ob_dfs, ignore_index=True)
 
         logger.info(
             "  combined rows=%d → running model inference",

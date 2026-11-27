@@ -26,12 +26,13 @@ GCR_REPO      ?= $(GCR_HOST)/$(GCP_PROJECT)/mars-rec
 DOCKER_IMAGE  ?= $(IMAGE_NAME):$(IMAGE_TAG)
 GCR_IMAGE     ?= $(GCR_REPO)/$(IMAGE_NAME):$(IMAGE_TAG)
 
-# Base image for Docker build (override for CPU-only: python:3.11-slim)
-BASE_IMAGE    ?= pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+# Base image for Docker build (override for CPU-only: python:3.12-slim).
+# Its torch release must match `torch==` in requirements.lock (checked at build time).
+BASE_IMAGE    ?= pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-dev lock audit test test-v test-cov lint format clean \
+.PHONY: help install install-dev install-locked lock lock-upgrade audit test test-v test-cov lint format clean \
         docker-build docker-run docker-run-data docker-test docker-push docker-pull \
         gcp-setup gcp-create-repo gcp-submit vertex-run \
         vertex-list-jobs vertex-download-model \
@@ -43,7 +44,9 @@ help:
 	@echo "  Development:"
 	@echo "    install        Install package (editable)"
 	@echo "    install-dev    Install package + dev dependencies"
+	@echo "    install-locked Install the pinned stack (requirements.lock) + dev deps"
 	@echo "    lock           Regenerate requirements.lock from pyproject.toml"
+	@echo "    lock-upgrade   Regenerate requirements.lock bumping every package"
 	@echo "    audit          Audit pinned dependencies for known CVEs"
 	@echo "    test           Run tests"
 	@echo "    test-v         Run tests (verbose)"
@@ -88,13 +91,34 @@ install-dev:
 	$(PIP) install -e ".[dev]"
 
 ## Regenerate requirements.lock from pyproject.toml (run after editing dependencies).
-## Pins every transitive dep — Docker images use this for reproducibility.
+## Pins every transitive dep — Docker images and CI install from it.
+## Resolved for LOCK_PYTHON (the oldest supported Python) so the lock installs
+## on every supported version (the Docker base image runs 3.12), whatever
+## interpreter runs `make lock`. Extra pins (e.g. the torch
+## CUDA 12.x ceiling) live in lock-constraints.txt.
+## Use `make lock-upgrade` to bump every package to its newest allowed version.
+LOCK_PYTHON ?= 3.11
+LOCK_ARGS   ?=
 lock:
-	$(PIP) install pip-tools
-	$(PYTHON) -m piptools compile --resolver=backtracking --output-file=requirements.lock pyproject.toml
+	$(PIP) install uv
+	$(PYTHON) -m uv pip compile pyproject.toml \
+		--python-version $(LOCK_PYTHON) \
+		--constraint lock-constraints.txt \
+		--output-file requirements.lock $(LOCK_ARGS)
 	@echo ""
 	@echo "Lockfile regenerated: requirements.lock"
 	@echo "Commit it to keep Docker / Vertex builds reproducible."
+
+lock-upgrade:
+	$(MAKE) lock LOCK_ARGS=--upgrade
+
+## Install exactly the pinned stack (what Docker / CI run) + dev tools.
+## TORCH_INDEX adds an extra index for torch wheels; CI sets it to the CPU
+## index (https://download.pytorch.org/whl/cpu) to skip the CUDA downloads.
+## `torch==X` in the lock also accepts the `X+cpu` build from that index.
+TORCH_INDEX ?=
+install-locked:
+	$(PIP) install $(if $(TORCH_INDEX),--extra-index-url $(TORCH_INDEX),) -r requirements.lock -e ".[dev]"
 
 ## Audit pinned dependencies for known CVEs.
 ## Reads requirements.lock so it audits exactly what ships in the image.
