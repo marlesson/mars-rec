@@ -61,12 +61,13 @@ examples/                   # Reference recsys projects (public datasets, auto-d
 
 scripts/
   make_vertex_config.py     # Builds the Vertex AI job config used by `make vertex-run`
+  make_regression_fixtures.py  # Regenerates tests/_fixtures/{legacy_artifacts,golden_history.json}
 
 tests/                      # Pytest suite (test_dataset, test_loss, test_metrics, test_meta_config, ...)
 CONTRIBUTING.md             # Branch / lint / PR workflow
 .github/                    # CI workflow, Dependabot, PR template
 Makefile                    # Development / Docker / Vertex AI targets (`make lint` = ruff check + format --check)
-Dockerfile                  # CPU/GPU image (default base: pytorch/pytorch:2.5.1-cuda12.4)
+Dockerfile                  # CPU/GPU image (default base: pytorch/pytorch:2.14.1-cuda12.6)
 entrypoint.sh               # Container entrypoint (dataset download, Vertex AI artifact upload)
 pyproject.toml              # Package metadata + dependencies; requirements.lock pins them
 ```
