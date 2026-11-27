@@ -32,7 +32,7 @@ BASE_IMAGE    ?= pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-dev install-locked lock lock-upgrade audit test test-v test-cov lint format clean \
+.PHONY: help install install-dev install-locked lock lock-upgrade audit test test-v test-cov test-ci lint format clean \
         docker-build docker-run docker-run-data docker-test docker-push docker-pull \
         gcp-setup gcp-create-repo gcp-submit vertex-run \
         vertex-list-jobs vertex-download-model \
@@ -138,7 +138,13 @@ test-v:
 	$(PYTEST) $(TESTS) -v
 
 test-cov:
-	$(PYTEST) $(TESTS) --cov=$(SRC) --cov-report=term-missing --cov-report=html
+	$(PYTEST) $(TESTS) --cov=$(SRC) --cov-branch --cov-report=term-missing --cov-report=html
+
+## CI entry point: full suite + branch coverage, failing below the floor.
+## Raise COV_FAIL_UNDER as coverage improves; never lower it to merge.
+COV_FAIL_UNDER ?= 70
+test-ci:
+	$(PYTEST) $(TESTS) --cov=$(SRC) --cov-branch --cov-report=term --cov-fail-under=$(COV_FAIL_UNDER)
 
 lint:
 	$(PYTHON) -m ruff check $(LINT_PATHS)

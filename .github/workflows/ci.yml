@@ -49,8 +49,8 @@ jobs:
           cache-dependency-path: requirements.lock
       - name: Install locked dependencies
         run: make install-locked
-      - name: Run tests
-        run: make test
+      - name: Run tests (with coverage floor)
+        run: make test-ci
 
   # Early warning: newest versions allowed by pyproject.toml, ignoring the
   # lock. A failure here does not block the PR; it means the next

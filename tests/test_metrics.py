@@ -393,88 +393,70 @@ class TestMRR:
 
 
 # ---------------------------------------------------------------------------
-# ROC-AUC (post-training, sklearn-based) — tested at the function level
+# ROC-AUC (post-training, sklearn-based) — ``inference.compute_roc_auc``
 # ---------------------------------------------------------------------------
 class TestComputeRocAuc:
-    """Tests for the _compute_roc_auc logic extracted as pure functions.
+    """Tests for ``mars_rec.inference.compute_roc_auc``.
 
-    These mirror the logic in SupervisedModelTraining._compute_roc_auc()
-    without requiring a full training pipeline.
+    The training-side twin (``SupervisedModelTraining._compute_roc_auc``)
+    is exercised end-to-end in ``test_training_e2e.py``.
     """
 
+    @staticmethod
+    def _onehot_logits(y_true, n_classes, scale=10.0):
+        logits = torch.full((len(y_true), n_classes), -scale)
+        logits[torch.arange(len(y_true)), y_true] = scale
+        return logits
+
     def test_multiclass_perfect(self):
-        """Perfect logits → AUC ≈ 1.0."""
-        from sklearn.metrics import roc_auc_score
-        import numpy as np
+        from mars_rec.inference import compute_roc_auc
 
-        n, c = 100, 5
-        y_true = np.random.randint(0, c, size=n)
-        # Perfect logits: high score for correct class
-        logits = np.full((n, c), -10.0)
-        logits[np.arange(n), y_true] = 10.0
-        probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
+        y_true = torch.tensor([0, 1, 2, 3, 4] * 20)
+        result = compute_roc_auc(self._onehot_logits(y_true, 5), y_true)
+        assert result == {"roc_auc_ovr": pytest.approx(1.0)}
 
-        y_onehot = np.zeros((n, c), dtype=int)
-        y_onehot[np.arange(n), y_true] = 1
+    def test_multiclass_random_is_near_chance(self):
+        from mars_rec.inference import compute_roc_auc
 
-        auc = roc_auc_score(y_onehot, probs, multi_class="ovr", average="macro")
-        assert auc == pytest.approx(1.0, abs=1e-6)
+        gen = torch.Generator().manual_seed(42)
+        y_true = torch.randint(0, 10, (5000,), generator=gen)
+        logits = torch.randn(5000, 10, generator=gen)
+        assert 0.45 < compute_roc_auc(logits, y_true)["roc_auc_ovr"] < 0.55
 
-    def test_multiclass_random(self):
-        """Random logits → AUC ≈ 0.5."""
-        from sklearn.metrics import roc_auc_score
-        import numpy as np
+    def test_multiclass_uses_only_present_classes(self):
+        """Classes absent from y_true (3, 4) must be dropped — otherwise
+        sklearn raises on all-zero one-hot columns."""
+        from mars_rec.inference import compute_roc_auc
 
-        np.random.seed(42)
-        n, c = 5000, 10
-        y_true = np.random.randint(0, c, size=n)
-        logits = np.random.randn(n, c)
-        probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
+        y_true = torch.tensor([0, 1, 2] * 10)
+        result = compute_roc_auc(self._onehot_logits(y_true, 5), y_true)
+        assert result == {"roc_auc_ovr": pytest.approx(1.0)}
 
-        y_onehot = np.zeros((n, c), dtype=int)
-        y_onehot[np.arange(n), y_true] = 1
+    def test_multiclass_single_class_is_skipped(self):
+        from mars_rec.inference import compute_roc_auc
 
-        auc = roc_auc_score(y_onehot, probs, multi_class="ovr", average="macro")
-        assert 0.4 < auc < 0.6
+        y_true = torch.tensor([3, 3, 3, 3])
+        assert compute_roc_auc(torch.randn(4, 5), y_true) == {}
 
-    def test_binary_roc_auc(self):
-        """Binary case: sigmoid scores → valid AUC."""
-        from sklearn.metrics import roc_auc_score
-        import numpy as np
+    def test_binary_logit_loss_applies_sigmoid(self):
+        """For logit losses the raw scores are squashed with sigmoid; without
+        it, clipping to [0, 1] would flatten every negative logit to 0."""
+        from mars_rec.inference import compute_roc_auc
 
-        y_true = np.array([0, 0, 1, 1, 1, 0, 1, 0])
-        y_scores = np.array([0.1, 0.3, 0.9, 0.8, 0.7, 0.2, 0.6, 0.4])
-        auc = roc_auc_score(y_true, y_scores)
-        assert 0.0 <= auc <= 1.0
-        assert auc > 0.8  # scores are well-ordered
+        y_true = torch.tensor([0, 0, 1, 1])
+        logits = torch.tensor([-3.0, -1.0, -0.5, 2.0])  # well ordered, mostly < 0
+        assert compute_roc_auc(logits, y_true, "bce_logits") == {"roc_auc": pytest.approx(1.0)}
+        # Without sigmoid, -3/-1/-0.5 all clip to 0 → ties lower the AUC.
+        assert compute_roc_auc(logits, y_true, "bce")["roc_auc"] < 1.0
 
-    def test_present_classes_filter(self):
-        """Only classes present in y_true should be used (OvR still works)."""
-        from sklearn.metrics import roc_auc_score
-        import numpy as np
+    def test_binary_probabilities(self):
+        from mars_rec.inference import compute_roc_auc
 
-        n, c = 60, 5
-        # Only use classes 0, 1, 2 (not 3 or 4)
-        y_true = np.random.choice([0, 1, 2], size=n)
-        logits = np.random.randn(n, c)
-        probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
+        y_true = torch.tensor([0, 0, 1, 1, 1, 0, 1, 0])
+        scores = torch.tensor([0.1, 0.3, 0.9, 0.8, 0.7, 0.2, 0.6, 0.4])
+        assert compute_roc_auc(scores, y_true, "bce") == {"roc_auc": pytest.approx(1.0)}
 
-        present = np.unique(y_true)
-        y_onehot = np.zeros((n, c), dtype=int)
-        y_onehot[np.arange(n), y_true] = 1
+    def test_binary_single_class_returns_empty(self):
+        from mars_rec.inference import compute_roc_auc
 
-        auc = roc_auc_score(
-            y_onehot[:, present],
-            probs[:, present],
-            multi_class="ovr",
-            average="macro",
-        )
-        assert 0.0 <= auc <= 1.0
-
-    def test_fewer_than_2_classes_skipped(self):
-        """If only 1 class present, ROC-AUC is undefined → should skip."""
-        import numpy as np
-
-        y_true = np.array([3, 3, 3, 3])
-        present = np.unique(y_true)
-        assert len(present) < 2  # Should not attempt AUC
+        assert compute_roc_auc(torch.tensor([0.2, 0.8]), torch.tensor([1, 1]), "bce") == {}

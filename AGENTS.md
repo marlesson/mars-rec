@@ -195,6 +195,8 @@ Columns of type `IOType.INDEXABLE` are converted from categorical values to inte
 - Index `1` is reserved for padding
 - Actual values start at `2`
 
+Inference never returns a reserved slot as a recommendation: `build_reverse_item_mapping` drops them and `predict_top_k` masks their logits.
+
 ### 6. Luigi caching and --no-cache
 
 Luigi marks tasks as DONE based on the existence of output files. If a training run fails midway but the output directory was already created, Luigi may consider the task complete. To force re-execution:
@@ -341,8 +343,9 @@ GCP-touching `make` targets (`docker-push`, `docker-pull`,
 python -c "from mars_rec.simulation.training import SupervisedModelTraining; print('OK')"
 python -c "from mars_rec.inference import run_inference, run_evaluate; print('OK')"
 
-# 2. Unit tests
+# 2. Unit tests (CI runs `make test-ci`: same suite + branch-coverage floor)
 make test
+make test-ci
 
 # 3. End-to-end test with MovieLens 100K slate sample (small + fast)
 PYTHONPATH=src:. python examples/movielens100k_slate/run_training.py
