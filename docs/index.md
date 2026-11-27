@@ -15,7 +15,7 @@ layers were removed, keeping a lean **data preparation â†’ supervised training â
 - :material-pipe: **Reproducible pipelines.** [Luigi](https://luigi.readthedocs.io/) caches every step by a
   hash of its parameters, so re-running a finished experiment is free.
 - :material-lightning-bolt: **PyTorch Lightning training loop.** Includes early stopping, checkpointing,
-  CSV/TensorBoard logging, gradient clipping and LR schedulers.
+  CSV logging (TensorBoard via the `tensorboard` extra), gradient clipping and LR schedulers.
 - :material-chart-line: **Ranking metrics.** Computes NDCG, HitRate, MRR and MAP @{5, 10, 20} plus
   ROC-AUC on the test split.
 - :material-console: **One CLI.** `mars-rec` handles training, comparing runs, batch inference,

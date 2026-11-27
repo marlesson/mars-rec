@@ -8,18 +8,30 @@ import pandas as pd
 import pytest
 
 from mars_rec.data import utils as data_utils
+from mars_rec.utils import download
 
 CSV = b"a,b\n1,2\n3,4\n"
 
 
 class _FakeResponse:
+    """Minimal stand-in for the object ``urllib.request.urlopen`` returns."""
+
     def __init__(self, body: bytes, content_length=None):
         self._body = body
-        self.headers = {} if content_length is None else {"content-length": str(content_length)}
+        self._pos = 0
+        self.headers = {} if content_length is None else {"Content-Length": str(content_length)}
 
-    def iter_content(self, block_size):
-        for i in range(0, len(self._body), block_size):
-            yield self._body[i : i + block_size]
+    def read(self, size=-1):
+        end = len(self._body) if size < 0 else self._pos + size
+        chunk = self._body[self._pos : end]
+        self._pos += len(chunk)
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 @pytest.fixture
@@ -27,11 +39,11 @@ def fake_get(monkeypatch):
     calls = []
 
     def install(body=CSV, content_length=len(CSV)):
-        def _get(url, stream=True):
-            calls.append(url)
+        def _urlopen(request, timeout=None, context=None):
+            calls.append(request.full_url)
             return _FakeResponse(body, content_length)
 
-        monkeypatch.setattr(data_utils.requests, "get", _get)
+        monkeypatch.setattr(download.urllib.request, "urlopen", _urlopen)
         return calls
 
     return install

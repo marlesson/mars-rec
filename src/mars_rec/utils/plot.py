@@ -1,4 +1,4 @@
-"""Matplotlib / Seaborn helpers that render training-time diagnostics.
+"""Matplotlib helpers that render training-time diagnostics.
 
 Every function returns a ``matplotlib.figure.Figure`` so the caller
 can either save it (``fig.savefig(...)``) or render inline. The
@@ -8,6 +8,7 @@ training task uses :func:`plot_history`, :func:`plot_scores`,
 ``plot_scores.png`` etc. into the run's output directory.
 """
 
+import functools
 from typing import Optional
 
 import matplotlib
@@ -17,7 +18,6 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.colors import LinearSegmentedColormap
 import pandas as pd
-import seaborn as sns
 import numpy as np
 from sklearn.metrics import (
     confusion_matrix,
@@ -27,13 +27,59 @@ from sklearn.metrics import (
     average_precision_score,
 )
 
-# Consistent style
-sns.set_theme(style="whitegrid", palette="muted", font_scale=1.05)
-_PALETTE = sns.color_palette("muted")
+# Consistent style: a white background with a light grid ("whitegrid") and
+# the "muted" palette, applied only while our figures are drawn so importing
+# mars_rec never changes the caller's global matplotlib settings.
+_PALETTE = ["#4878D0", "#EE854A", "#6ACC64", "#D65F5F", "#956CB4", "#8C613C", "#DC7EC0", "#797979", "#D5BB67"]
 _TRAIN_COLOR = _PALETTE[0]  # blue
 _VAL_COLOR = _PALETTE[3]  # red/coral
+_STYLE = {
+    "axes.facecolor": "white",
+    "axes.edgecolor": "#CCCCCC",
+    "axes.grid": True,
+    "axes.axisbelow": True,
+    "axes.prop_cycle": matplotlib.cycler(color=_PALETTE),
+    "grid.color": "#CCCCCC",
+    "grid.linestyle": "-",
+    "font.size": 10.5,
+    "font.family": ["sans-serif"],
+    "font.sans-serif": ["Arial", "DejaVu Sans", "Liberation Sans", "Bitstream Vera Sans", "sans-serif"],
+}
 
 
+def _styled(fn):
+    """Render ``fn``'s figure under :data:`_STYLE`."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with plt.rc_context(_STYLE):
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def _despine(ax) -> None:
+    """Hide the top and right spines."""
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def _density_histogram(ax, values: np.ndarray, color, max_kde_points: int = 10_000) -> None:
+    """Density histogram plus a Gaussian KDE line (Scott's bandwidth)."""
+    ax.hist(values, bins="auto", density=True, color=color, edgecolor="white", linewidth=0.5, alpha=0.6)
+    std = values.std()
+    if len(values) < 2 or std == 0:
+        return  # a KDE is undefined for a single or constant value
+    # Subsample for the KDE: its cost is O(n * grid) and the curve is a summary.
+    if len(values) > max_kde_points:
+        values = np.random.default_rng(0).choice(values, size=max_kde_points, replace=False)
+    bandwidth = std * len(values) ** (-1 / 5)
+    grid = np.linspace(values.min(), values.max(), 200)
+    z = (grid[:, None] - values[None, :]) / bandwidth
+    density = np.exp(-0.5 * z**2).sum(axis=1) / (len(values) * bandwidth * np.sqrt(2 * np.pi))
+    ax.plot(grid, density, color=color, linewidth=1.5)
+
+
+@_styled
 def plot_history(
     history_df: pd.DataFrame,
     model_name: Optional[str] = None,
@@ -127,7 +173,7 @@ def plot_history(
         if metric == "loss":
             ax.set_yscale("log")
 
-        sns.despine(ax=ax, left=False, bottom=False)
+        _despine(ax)
 
     # Suptitle with model info
     title_parts = []
@@ -150,6 +196,7 @@ def plot_history(
     return fig
 
 
+@_styled
 def plot_scores(
     scores: np.ndarray,
     model_name: Optional[str] = None,
@@ -169,16 +216,7 @@ def plot_scores(
     fig, ax = plt.subplots(figsize=(7, 4.5))
 
     # Histogram + KDE
-    sns.histplot(
-        scores,
-        kde=True,
-        stat="density",
-        color=_TRAIN_COLOR,
-        edgecolor="white",
-        linewidth=0.5,
-        alpha=0.6,
-        ax=ax,
-    )
+    _density_histogram(ax, scores.astype(float).ravel(), _TRAIN_COLOR)
 
     # Stats annotations
     mean_val = np.mean(scores)
@@ -214,7 +252,7 @@ def plot_scores(
     ax.set_ylabel("Density", fontsize=11)
     ax.legend(frameon=True, fancybox=True, fontsize=9, loc="upper left")
     ax.tick_params(labelsize=9)
-    sns.despine(ax=ax, left=False, bottom=False)
+    _despine(ax)
 
     # Title with model info
     title_parts = ["Score Distribution"]
@@ -248,6 +286,7 @@ def _make_subtitle(task_id: Optional[str], extra_info: Optional[dict]) -> Option
     return "  ".join(parts) if parts else None
 
 
+@_styled
 def plot_confusion_matrix(
     y_true: np.ndarray,
     y_scores: np.ndarray,
@@ -284,17 +323,16 @@ def plot_confusion_matrix(
     # Custom colormap
     cmap = LinearSegmentedColormap.from_list("custom", ["#FFFFFF", _TRAIN_COLOR], N=256)
 
-    sns.heatmap(
-        cm,
-        annot=False,
-        fmt="d",
-        cmap=cmap,
-        linewidths=1.5,
-        linecolor="white",
-        square=True,
-        cbar=False,
-        ax=ax,
-    )
+    # Heatmap: cell (i, j) spans [j, j+1] x [i, i+1], row 0 at the top.
+    ax.pcolormesh(cm, cmap=cmap, edgecolors="white", linewidth=1.5)
+    ax.set_xlim(0, cm.shape[1])
+    ax.set_ylim(cm.shape[0], 0)
+    ax.set_aspect("equal")
+    ax.set_xticks(np.arange(cm.shape[1]) + 0.5)
+    ax.set_yticks(np.arange(cm.shape[0]) + 0.5)
+    ax.grid(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
 
     # Annotate cells with count and percentage
     for i in range(cm.shape[0]):
@@ -370,6 +408,7 @@ def plot_confusion_matrix(
     return fig
 
 
+@_styled
 def plot_roc_curve(
     y_true: np.ndarray,
     y_scores: np.ndarray,
@@ -436,7 +475,7 @@ def plot_roc_curve(
     ax.legend(frameon=True, fancybox=True, fontsize=10, loc="lower right")
     ax.tick_params(labelsize=9)
     ax.set_aspect("equal")
-    sns.despine(ax=ax, left=False, bottom=False)
+    _despine(ax)
 
     # AUC box
     auc_text = f"AUC = {roc_auc:.4f}"
@@ -467,6 +506,7 @@ def plot_roc_curve(
     return fig
 
 
+@_styled
 def plot_precision_recall_curve(
     y_true: np.ndarray,
     y_scores: np.ndarray,
@@ -536,7 +576,7 @@ def plot_precision_recall_curve(
     ax.set_ylim([0, 1.05])
     ax.legend(frameon=True, fancybox=True, fontsize=10, loc="upper right")
     ax.tick_params(labelsize=9)
-    sns.despine(ax=ax, left=False, bottom=False)
+    _despine(ax)
 
     # AP box
     ax.text(

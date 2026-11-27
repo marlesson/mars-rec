@@ -76,27 +76,14 @@ class DownloadAndPrepareML100KSlate(luigi.Task):
         )
 
     def run(self):
-        import math
-
-        import requests
-        from tqdm import tqdm
+        from mars_rec.utils.download import download_file
 
         os.makedirs(DATASET_DIR, exist_ok=True)
 
         zip_path = os.path.join(DATASET_DIR, "ml-100k.zip")
         if not os.path.exists(zip_path):
             print(f"Downloading MovieLens 100K from {ML100K_URL}...")
-            r = requests.get(ML100K_URL, stream=True)
-            total = int(r.headers.get("content-length", 0))
-            block = 1024
-            with open(zip_path, "wb") as f:
-                for chunk in tqdm(
-                    r.iter_content(block),
-                    total=math.ceil(total / block) if total else 0,
-                    unit="KB",
-                    unit_scale=True,
-                ):
-                    f.write(chunk)
+            download_file(ML100K_URL, zip_path)
 
         extract_dir = os.path.join(DATASET_DIR, "ml-100k")
         if not os.path.exists(extract_dir):

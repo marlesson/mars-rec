@@ -64,9 +64,7 @@ class DownloadAndPrepareMovieLens(luigi.Task):
         return luigi.LocalTarget(os.path.join(DATASET_DIR, "movielens_1m.csv"))
 
     def run(self):
-        import requests
-        import math
-        from tqdm import tqdm
+        from mars_rec.utils.download import download_file
 
         os.makedirs(DATASET_DIR, exist_ok=True)
 
@@ -74,17 +72,7 @@ class DownloadAndPrepareMovieLens(luigi.Task):
         zip_path = os.path.join(DATASET_DIR, "ml-1m.zip")
         if not os.path.exists(zip_path):
             print(f"Downloading MovieLens 1M from {MOVIELENS_1M_URL}...")
-            r = requests.get(MOVIELENS_1M_URL, stream=True)
-            total_size = int(r.headers.get("content-length", 0))
-            block_size = 1024
-            with open(zip_path, "wb") as f:
-                for data in tqdm(
-                    r.iter_content(block_size),
-                    total=math.ceil(total_size / block_size) if total_size else 0,
-                    unit="KB",
-                    unit_scale=True,
-                ):
-                    f.write(data)
+            download_file(MOVIELENS_1M_URL, zip_path)
 
         # Extract
         extract_dir = os.path.join(DATASET_DIR, "ml-1m")

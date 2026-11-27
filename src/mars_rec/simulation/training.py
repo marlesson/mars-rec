@@ -12,7 +12,8 @@ that:
    :class:`RecommenderModule` and the project's loss function.
 4. Wraps the model in a ``RecommenderLightningModule`` and runs the
    ``pytorch_lightning.Trainer`` with EarlyStopping, ModelCheckpoint,
-   CSVLogger and TensorBoardLogger callbacks.
+   CSVLogger and (when ``mars-rec[tensorboard]`` is installed)
+   TensorBoardLogger callbacks.
 5. Evaluates on the held-out test set and saves every artifact
    (``weights.ckpt``, ``history.csv``, ``params.json``,
    ``metadata.json``, ``index_mapping.pkl``,
@@ -81,7 +82,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from mars_rec.cuda import CudaRepository
 from mars_rec.data.dataset import (
     preprocess_interactions_data_frame,
     preprocess_metadata_data_frame,
@@ -137,6 +137,15 @@ from mars_rec.utils.reflection import load_attr
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+def _tensorboard_available() -> bool:
+    """Whether Lightning's ``TensorBoardLogger`` has a backend to write with."""
+    import importlib.util
+
+    return any(importlib.util.find_spec(name) is not None for name in ("tensorboard", "tensorboardX"))
+
+
 # Suppress internal Lightning deprecation about LeafSpec (fixed in future PL version)
 warnings.filterwarnings("ignore", message=".*LeafSpec.*")
 
@@ -586,8 +595,6 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             raise
         finally:
             gc.collect()
-            if self.device == "cuda":
-                CudaRepository.put_available_device(self.device_id)
 
 
 class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
@@ -666,13 +673,13 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         return "auto"
 
     @property
-    def device_id(self):
-        if not hasattr(self, "_device_id"):
-            if self.device == "cuda":
-                self._device_id = CudaRepository.get_avaliable_device()
-            else:
-                self._device_id = None
-        return self._device_id
+    def device_id(self) -> Optional[int]:
+        """CUDA device index used when ``device == "cuda"``, else ``None``.
+
+        Always the first visible GPU. To run tasks in parallel on different
+        GPUs, give each process its own ``CUDA_VISIBLE_DEVICES``.
+        """
+        return 0 if self.device == "cuda" else None
 
     @property
     def module_class(self) -> Type[RecommenderModule]:
@@ -1116,13 +1123,20 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         return callbacks
 
     def _get_loggers(self):
-        return [
-            CSVLogger(save_dir=self.output().path, name="lightning_logs", version=""),
-            TensorBoardLogger(
-                save_dir=os.path.dirname(get_tensorboard_logdir(self.task_id)),
-                name=os.path.basename(get_tensorboard_logdir(self.task_id)),
-            ),
-        ]
+        # CSVLogger is the source of ``history.csv`` and always runs.
+        loggers = [CSVLogger(save_dir=self.output().path, name="lightning_logs", version="")]
+        # TensorBoard logging is optional (``pip install "mars-rec[tensorboard]"``):
+        # Lightning's TensorBoardLogger needs ``tensorboard`` or ``tensorboardX``.
+        if _tensorboard_available():
+            loggers.append(
+                TensorBoardLogger(
+                    save_dir=os.path.dirname(get_tensorboard_logdir(self.task_id)),
+                    name=os.path.basename(get_tensorboard_logdir(self.task_id)),
+                )
+            )
+        else:
+            logger.debug("tensorboard/tensorboardX not installed: TensorBoard logging disabled")
+        return loggers
 
     def _get_extra_callbacks(self):
         return []

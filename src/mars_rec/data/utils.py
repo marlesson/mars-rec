@@ -11,10 +11,8 @@ import luigi
 
 import pandas as pd
 import os
-import requests
-from tqdm import tqdm
-import math
 from mars_rec.utils import files
+from mars_rec.utils.download import download_file
 
 DATASETS = dict(
     random=["https://storage.googleapis.com/mars-gym-dataset/raw/random/dataset.csv"],
@@ -48,23 +46,7 @@ def load_dataset(name, cache=True, output_path=".", **kws):
     for url in DATASETS[name]:
         output_file = os.path.join(output_path, name, os.path.basename(url))
         if not os.path.isfile(output_file) or not cache:
-            r = requests.get(url, stream=True)
-
-            total_size = int(r.headers.get("content-length", 0))
-            block_size = 1024
-            wrote = 0
-            os.makedirs(os.path.split(output_file)[0], exist_ok=True)
-            with open(output_file, "wb") as f:
-                for data in tqdm(
-                    r.iter_content(block_size),
-                    total=math.ceil(total_size // block_size),
-                    unit="KB",
-                    unit_scale=True,
-                ):
-                    wrote = wrote + len(data)
-                    f.write(data)
-            if total_size != 0 and wrote != total_size:
-                raise ConnectionError("ERROR, something went wrong")
+            download_file(url, output_file)
 
         df = pd.read_csv(output_file, **kws)
         results.append(df)

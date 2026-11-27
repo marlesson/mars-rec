@@ -57,27 +57,14 @@ class DownloadAndPrepareAmazonBeauty(luigi.Task):
         )
 
     def run(self):
-        import math
-
-        import requests
-        from tqdm import tqdm
+        from mars_rec.utils.download import download_file
 
         os.makedirs(DATASET_DIR, exist_ok=True)
 
         gz_path = os.path.join(DATASET_DIR, "reviews_Beauty_5.json.gz")
         if not os.path.exists(gz_path):
             print(f"Downloading Beauty 5-core reviews from {REVIEWS_URL}...")
-            r = requests.get(REVIEWS_URL, stream=True)
-            total = int(r.headers.get("content-length", 0))
-            block = 1024
-            with open(gz_path, "wb") as f:
-                for chunk in tqdm(
-                    r.iter_content(block),
-                    total=math.ceil(total / block) if total else 0,
-                    unit="KB",
-                    unit_scale=True,
-                ):
-                    f.write(chunk)
+            download_file(REVIEWS_URL, gz_path)
 
         print("Parsing JSONL...")
         df = _parse_jsonl_gz(gz_path)

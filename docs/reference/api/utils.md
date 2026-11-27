@@ -26,3 +26,7 @@ Helpers for artifact paths, index mapping, logging, plots and dynamic imports.
     options:
       show_root_full_path: true
 
+
+::: mars_rec.utils.download
+    options:
+      show_root_full_path: true

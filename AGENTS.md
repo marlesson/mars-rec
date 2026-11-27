@@ -41,7 +41,6 @@ MARS-Rec is a framework for training deep learning models for recommendation sys
 src/mars_rec/          # Framework source code (the only installable package)
   meta_config.py            # ProjectConfig, Column, IOType — central definitions
   cli.py                    # CLI (Click): "run supervised", "run data", "list", "results", "predict", "evaluate", "visualize"
-  cuda.py                   # CudaRepository — device management
   filtering.py              # CandidateProvider / CandidateFilter — inference-time candidate pools
   inference.py              # Standalone inference + evaluation (run_inference, run_evaluate)
   visualization.py          # Architecture visualization — single module, SVG-only.
@@ -73,6 +72,7 @@ src/mars_rec/          # Framework source code (the only installable package)
     logging.py              # Logger setup
     reflection.py           # load_attr — dynamic module import by string
     utils.py                # General utilities (parallel literal_eval, reduce memory)
+    download.py             # download_file — stdlib HTTP download (certifi CA bundle, atomic rename)
     plot.py                 # Training history plots
 
 examples/                   # Reference recsys projects (public datasets, auto-download)
@@ -115,7 +115,7 @@ The pipeline follows this sequence orchestrated by Luigi:
    ├── Loads train/val/test DataFrames
    ├── Creates index_mapping (categorical → integer)
    ├── Instantiates the model (RecommenderModule) within RecommenderLightningModule
-   ├── Trains with PyTorch Lightning (callbacks: EarlyStopping, Checkpoint, CSVLogger, TensorBoard)
+   ├── Trains with PyTorch Lightning (callbacks: EarlyStopping, Checkpoint, CSVLogger, TensorBoard if the `tensorboard` extra is installed)
    ├── Evaluates on the validation set
    ├── Generates predictions on the test set
    ├── Optional: ranking metrics (NDCG/HitRate/MRR/MAP @{5,10,20}) + ROC-AUC → metadata.json

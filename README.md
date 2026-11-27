@@ -16,7 +16,7 @@ evaluation** pipeline built on Luigi, PyTorch and PyTorch Lightning.
 - **Declarative projects**: a single `ProjectConfig` declares the columns, their types, the
   data-prep task and the dataset class.
 - **Reproducible pipelines**: Luigi caches every step by a hash of its parameters.
-- **PyTorch Lightning training loop**: early stopping, checkpointing, CSV/TensorBoard logging,
+- **PyTorch Lightning training loop**: early stopping, checkpointing, CSV logging (TensorBoard optional),
   LR schedulers and mixed precision.
 - **Ranking metrics**: NDCG, HitRate, MRR and MAP @{5, 10, 20} plus ROC-AUC.
 - **One CLI** (`mars-rec`): `run`, `list`, `results`, `predict`, `evaluate` and `visualize`.
