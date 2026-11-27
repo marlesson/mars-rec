@@ -97,8 +97,10 @@ def _get_results_dir():
 
 def _load_run(run_dir):
     """Load metadata for a single training run."""
-    params_path = os.path.join(run_dir, "params.json")
-    history_path = os.path.join(run_dir, "history.csv")
+    from mars_rec.utils.files import get_history_path, get_metadata_path, get_params_path
+
+    params_path = get_params_path(run_dir)
+    history_path = get_history_path(run_dir)
 
     if not os.path.exists(params_path):
         return None
@@ -124,7 +126,7 @@ def _load_run(run_dir):
             best_metrics["total_epochs"] = int(last["epoch"]) + 1
 
     # Load ranking metrics from metadata.json (computed post-training)
-    metadata_path = os.path.join(run_dir, "metadata.json")
+    metadata_path = get_metadata_path(run_dir)
     if os.path.exists(metadata_path):
         with open(metadata_path) as f:
             metadata = json.load(f)
@@ -422,7 +424,13 @@ def predict(model_dir, task_id, data, output, batch_size, top_k, device):
 @click.option(
     "--output",
     default=None,
-    help="Directory to save evaluation artifacts (plots, predictions, eval_results.json). Defaults to the model task directory.",
+    help="Directory to save evaluation artifacts (metrics.json, predictions.csv, plots/). Defaults to <task_dir>/eval/<name>/.",
+)
+@click.option(
+    "--name",
+    "eval_name",
+    default=None,
+    help="Evaluation name, i.e. the <task_dir>/eval/<name>/ directory. Defaults to 'test' for the original splits and to the --data file name (without extension) for external data. Only 'test' refreshes metadata.json.",
 )
 @click.option(
     "--prefilter/--no-prefilter",
@@ -430,7 +438,18 @@ def predict(model_dir, task_id, data, output, batch_size, top_k, device):
     help="Apply the project's CandidateProvider (eligibility filter) when generating ranking-metrics candidates. Default off: ranking metrics are computed against the legacy random-sample candidate pool. Configs without a provider declared are unaffected.",
 )
 def evaluate_cmd(
-    model_dir, task_id, data, metric, ranking_metrics, sample_size_eval, batch_size, device, split, output, prefilter
+    model_dir,
+    task_id,
+    data,
+    metric,
+    ranking_metrics,
+    sample_size_eval,
+    batch_size,
+    device,
+    split,
+    output,
+    eval_name,
+    prefilter,
 ):
     """Re-run evaluation on training splits or on a new external dataset.
 
@@ -439,7 +458,7 @@ def evaluate_cmd(
       mars-rec evaluate --task-id <ID> --ranking-metrics --metric f1_score
 
     \b
-    Flow 2 (external data):
+    Flow 2 (external data, written to <task_dir>/eval/new_test/):
       mars-rec evaluate --task-id <ID> --data new_test.parquet --ranking-metrics
     """
     import sys
@@ -467,6 +486,17 @@ def evaluate_cmd(
 
     metrics_list = list(metric) if metric else None
 
+    try:
+        from mars_rec.utils.files import DEFAULT_EVAL_NAME, validate_eval_name
+
+        if eval_name is not None:
+            validate_eval_name(eval_name)
+        if data is not None and eval_name == DEFAULT_EVAL_NAME and output is None:
+            raise ValueError(f"The evaluation name {DEFAULT_EVAL_NAME!r} is reserved for the original test split.")
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
     results = run_evaluate(
         task_dir=model_dir,
         metrics=metrics_list,
@@ -478,6 +508,7 @@ def evaluate_cmd(
         data_path=data,
         output_dir=output,
         enable_prefilter=prefilter,
+        eval_name=eval_name,
     )
 
     # Print summary
@@ -513,7 +544,10 @@ def evaluate_cmd(
     help="svg: writes architecture.svg (default).  summary: prints a text table.",
 )
 @click.option(
-    "--output", "-o", default=None, help="Output .svg path (svg mode only). Defaults to <task_dir>/architecture.svg."
+    "--output",
+    "-o",
+    default=None,
+    help="Output .svg path (svg mode only). Defaults to <task_dir>/model/architecture.svg.",
 )
 @click.option(
     "--trace/--no-trace", default=True, help="Trace tensor shapes via a forward pass (slightly slower, more accurate)."
@@ -564,7 +598,9 @@ def visualize(model_dir, task_id, mode, output, trace, device):
         return
 
     if output is None:
-        output = os.path.join(model_dir, "architecture.svg")
+        from mars_rec.utils.files import get_architecture_path
+
+        output = get_architecture_path(model_dir)
 
     rendered = generate_architecture_diagram(
         model,

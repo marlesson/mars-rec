@@ -96,7 +96,7 @@ def trained_run(tmp_path_factory):
         task.requires().run()
         task.run()
 
-        task_dir = Path(task.output().path).resolve()
+        task_dir = Path(task.task_dir).resolve()
         with open(task_dir / "metadata.json") as f:
             metadata = json.load(f)
         (test_csv,) = (root / "ds").glob("test_*.csv")
@@ -127,21 +127,65 @@ class TestTrainingArtifacts:
         """Every artifact downstream consumers depend on is on disk."""
         for name in (
             "params.json",
-            "index_mapping.pkl",
-            "history.csv",
             "metadata.json",
-            "summary.txt",
-            "weights.ckpt",
-            "test_set_predictions.csv",
+            "model/weights.ckpt",
+            "model/index_mapping.pkl",
+            "model/summary.txt",
             # Architecture SVG is always emitted with trace=True.
-            "architecture.svg",
+            "model/architecture.svg",
+            "training/history.csv",
+            "training/plot_history.jpg",
+            "training/lightning_logs/metrics.csv",
+            "training/samples/sample_train.csv",
+            "training/samples/sample_train_scores.csv",
+            "eval/test/metrics.json",
+            "eval/test/predictions.csv",
+            "eval/test/plots/scores.png",
         ):
             assert (trained_run.task_dir / name).exists(), f"missing artifact: {name}"
 
         # The diagram must contain at least one tensor shape annotation —
         # otherwise the forward-pass trace silently failed.
-        svg_content = (trained_run.task_dir / "architecture.svg").read_text()
+        svg_content = (trained_run.task_dir / "model" / "architecture.svg").read_text()
         assert "[B" in svg_content, "no tensor shape annotations in architecture.svg"
+
+    def test_root_holds_only_run_level_files(self, trained_run):
+        """Everything except the run identity / summary lives in a sub-directory."""
+        files_at_root = {p.name for p in trained_run.task_dir.iterdir() if p.is_file()}
+        dirs_at_root = {p.name for p in trained_run.task_dir.iterdir() if p.is_dir()}
+        assert files_at_root == {"_SUCCESS", "params.json", "metadata.json"}
+        assert dirs_at_root == {"model", "training", "eval"}
+
+    def test_finished_run_is_complete(self, trained_run, monkeypatch):
+        """``_SUCCESS`` is the Luigi output; a rebuilt task sees the run as done."""
+        monkeypatch.chdir(trained_run.root)
+        task = _build_task()
+        assert task.task_id == trained_run.task_id
+        assert task.output().path.endswith("_SUCCESS")
+        assert task.complete()
+
+    def test_run_without_marker_is_not_complete(self, trained_run, monkeypatch):
+        """A directory left by a killed run (no ``_SUCCESS``) must be re-run by Luigi."""
+        monkeypatch.chdir(trained_run.root)
+        marker = trained_run.task_dir / "_SUCCESS"
+        marker.unlink()
+        try:
+            assert not _build_task().complete()
+        finally:
+            marker.touch()
+
+    def test_metadata_lists_artifacts_with_relative_paths(self, trained_run):
+        artifacts = trained_run.metadata["artifacts"]
+        assert "model/weights.ckpt" in artifacts
+        assert "eval/test/predictions.csv" in artifacts
+        assert artifacts == sorted(artifacts)
+
+    def test_training_writes_test_eval_metrics(self, trained_run):
+        with open(trained_run.task_dir / "eval" / "test" / "metrics.json") as f:
+            metrics = json.load(f)
+        assert metrics["ranking_metrics"] == trained_run.metadata["ranking_metrics"]
+        assert metrics["roc_auc_metrics"] == trained_run.metadata["roc_auc_metrics"]
+        assert metrics["val_metrics"] == trained_run.metadata["evaluation"]
 
     def test_metadata_json_records_run_info(self, trained_run):
         """``metadata.json`` must include the task_id, seed, and data sizes —
@@ -176,7 +220,7 @@ class TestTrainingArtifacts:
 
     def test_test_set_predictions_are_ranked_per_row(self, trained_run):
         test_df = pd.read_csv(trained_run.test_csv)
-        preds = pd.read_csv(trained_run.task_dir / "test_set_predictions.csv")
+        preds = pd.read_csv(trained_run.task_dir / "eval" / "test" / "predictions.csv")
         assert len(preds) == len(test_df)
         for column in ("sorted_actions", "action_scores", "trained", "item_indexed"):
             assert column in preds.columns
@@ -188,7 +232,7 @@ class TestTrainingArtifacts:
         """The saved index_mapping must honour OOV=0 / NaN=1 / -1=2
         reservations from ``create_index_mapping`` — every downstream
         inference call relies on these slots being free."""
-        with open(trained_run.task_dir / "index_mapping.pkl", "rb") as f:
+        with open(trained_run.task_dir / "model" / "index_mapping.pkl", "rb") as f:
             idx = pickle.load(f)
 
         # np.nan-as-dict-key cannot be looked up directly (nan != nan), so
@@ -232,7 +276,7 @@ class TestRunEvaluateOriginalSplits:
 
         results = run_evaluate(str(trained_run.task_dir), eval_split="all")
 
-        with open(trained_run.task_dir / "eval_results.json") as f:
+        with open(trained_run.task_dir / "eval" / "test" / "metrics.json") as f:
             assert json.load(f)["ranking_metrics"] == results["ranking_metrics"]
         with open(trained_run.task_dir / "metadata.json") as f:
             meta = json.load(f)
@@ -283,10 +327,37 @@ class TestRunEvaluateExternalData:
         assert results["ranking_metrics"] == trained_run.metadata["ranking_metrics"]
         assert results["roc_auc_metrics"] == trained_run.metadata["roc_auc_metrics"]
         assert "val_loss" in results["val_metrics"]
-        for name in ("eval_results.json", "test_set_predictions.csv"):
+        for name in ("metrics.json", "predictions.csv"):
             assert (out_dir / name).exists(), name
         # A separate output_dir must leave the task's metadata.json untouched.
         assert (trained_run.task_dir / "metadata.json").read_text() == metadata_before
+
+    def test_external_data_gets_its_own_eval_dir(self, trained_run, tmp_path):
+        """Without ``output_dir``, external data goes to ``eval/<file stem>/`` and
+        neither the canonical test evaluation nor ``metadata.json`` is touched."""
+        from mars_rec.simulation.training import run_evaluate
+
+        external = tmp_path / "holdout_2026.csv"
+        pd.read_csv(trained_run.test_csv).to_csv(external, index=False)
+        test_eval = trained_run.task_dir / "eval" / "test"
+        test_metrics_before = (test_eval / "metrics.json").read_text()
+        metadata_before = (trained_run.task_dir / "metadata.json").read_text()
+
+        run_evaluate(str(trained_run.task_dir), data_path=str(external))
+        run_evaluate(str(trained_run.task_dir), data_path=str(external), eval_name="custom")
+
+        for name in ("holdout_2026", "custom"):
+            assert (trained_run.task_dir / "eval" / name / "metrics.json").exists(), name
+            assert (trained_run.task_dir / "eval" / name / "predictions.csv").exists(), name
+        assert (test_eval / "metrics.json").read_text() == test_metrics_before
+        assert (trained_run.task_dir / "metadata.json").read_text() == metadata_before
+
+    @pytest.mark.parametrize("name", ["test", "../escape", ""])
+    def test_external_data_rejects_reserved_or_invalid_names(self, trained_run, name):
+        from mars_rec.simulation.training import run_evaluate
+
+        with pytest.raises(ValueError):
+            run_evaluate(str(trained_run.task_dir), data_path=str(trained_run.test_csv), eval_name=name)
 
     def test_reads_parquet(self, trained_run, tmp_path):
         from mars_rec.simulation.training import run_evaluate
@@ -358,14 +429,14 @@ class TestCliOnTrainedRun:
         assert "EVALUATION SUMMARY" in result.output
         assert "ndcg@10" in result.output
         assert "roc_auc" in result.output
-        assert (tmp_path / "eval_results.json").exists()
+        assert (tmp_path / "metrics.json").exists()
 
     def test_evaluate_by_task_id(self, trained_run, tmp_path, monkeypatch):
         """``--task-id`` resolves under ``<OUTPUT_PATH>/models/…/results``
         (``OUTPUT_PATH`` is the relative ``output/`` here, hence the chdir)."""
         monkeypatch.chdir(trained_run.root)
         self._invoke("evaluate", "--task-id", trained_run.task_id, "--split", "val", "--output", str(tmp_path))
-        assert (tmp_path / "eval_results.json").exists()
+        assert (tmp_path / "metrics.json").exists()
 
     def test_evaluate_external_data_missing_file_exits_nonzero(self, trained_run, tmp_path):
         from click.testing import CliRunner
@@ -377,6 +448,26 @@ class TestCliOnTrainedRun:
         )
         assert result.exit_code == 1
         assert "Data file not found" in result.output
+
+    def test_evaluate_rejects_reserved_name_for_external_data(self, trained_run):
+        from click.testing import CliRunner
+
+        from mars_rec import cli as cli_mod
+
+        result = CliRunner().invoke(
+            cli_mod.cli,
+            [
+                "evaluate",
+                "--model-dir",
+                str(trained_run.task_dir),
+                "--data",
+                str(trained_run.test_csv),
+                "--name",
+                "test",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "reserved" in result.output
 
     def test_predict_writes_result_json(self, trained_run, tmp_path):
         out = tmp_path / "result.json"

@@ -20,7 +20,6 @@ Usage (CLI)::
         --data data/test.parquet --output result.json
 """
 
-import glob
 import json
 import logging
 import os
@@ -43,6 +42,7 @@ from mars_rec.filtering import CandidateProvider
 from mars_rec.meta_config import ProjectConfig, IOType
 from mars_rec.torch.data import NoAutoCollationDataLoader, FasterBatchSampler
 from mars_rec.utils.files import (
+    find_checkpoint,
     get_params,
     get_index_mapping_path,
 )
@@ -99,10 +99,9 @@ def load_trained_model(
     ).to(torch_device)
 
     # Load weights from Lightning checkpoint
-    ckpt_files = glob.glob(os.path.join(task_dir, "weights*.ckpt"))
-    if not ckpt_files:
+    ckpt_path = find_checkpoint(task_dir)
+    if ckpt_path is None:
         raise FileNotFoundError(f"No checkpoint found in {task_dir}")
-    ckpt_path = max(ckpt_files, key=os.path.getmtime)
     checkpoint = torch.load(ckpt_path, map_location=torch_device, weights_only=False)
     state_dict = {k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()}
     model.load_state_dict(state_dict)

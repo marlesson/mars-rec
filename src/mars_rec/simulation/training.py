@@ -15,10 +15,10 @@ that:
    CSVLogger and (when ``mars-rec[tensorboard]`` is installed)
    TensorBoardLogger callbacks.
 5. Evaluates on the held-out test set and saves every artifact
-   (``weights.ckpt``, ``history.csv``, ``params.json``,
-   ``metadata.json``, ``index_mapping.pkl``,
-   ``test_set_predictions.csv``, training-curve plots, …) under
-   ``output/models/SupervisedModelTraining/results/<task_id>/``.
+   (``params.json``, ``metadata.json``, ``model/``, ``training/`` and
+   ``eval/test/``) under
+   ``output/models/SupervisedModelTraining/results/<task_id>/``; the layout
+   is defined in :mod:`mars_rec.utils.files`.
 
 The class hierarchy is::
 
@@ -111,13 +111,33 @@ from mars_rec.torch.loss import (
 from mars_rec.torch.optimizer import RAdam
 from mars_rec.torch.summary import summary
 from mars_rec.utils.files import (
-    get_params_path,
-    get_params,
+    CHECKPOINT_NAME,
+    DEFAULT_EVAL_NAME,
+    ensure_parent_dir,
+    find_checkpoint,
+    get_architecture_path,
+    get_eval_dir,
+    get_eval_plot_path,
+    get_eval_results_path,
     get_history_path,
-    get_tensorboard_logdir,
-    get_task_dir,
-    get_test_set_predictions_path,
     get_index_mapping_path,
+    get_metadata_path,
+    get_model_dir,
+    get_params,
+    get_params_path,
+    get_plot_history_path,
+    get_sample_train_keys_path,
+    get_sample_train_path,
+    get_sample_train_scores_path,
+    get_summary_path,
+    get_task_dir,
+    get_tensorboard_logdir,
+    get_test_set_predictions_path,
+    get_success_marker_path,
+    get_training_logs_dir,
+    is_complete_run,
+    list_artifacts,
+    validate_eval_name,
 )
 from mars_rec.utils.index_mapping import (
     create_index_mapping,
@@ -247,15 +267,15 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
     negative_proportion: float = luigi.FloatParameter(0.0)
 
     def invalidate_cache(self):
-        """Delete all cached outputs for this task and its data preparation dependency."""
+        """Delete all cached outputs for this task (the whole :attr:`task_dir`) and its data preparation dependency."""
         # Invalidate data preparation outputs
         prep = self.prepare_data_frames
         for target in prep.output():
             if hasattr(target, "path") and os.path.exists(target.path):
                 os.remove(target.path)
         # Invalidate own output
-        if self.output().exists():
-            shutil.rmtree(self.output().path, ignore_errors=True)
+        if os.path.exists(self.task_dir):
+            shutil.rmtree(self.task_dir, ignore_errors=True)
 
     @property
     def cache_attrs(self):
@@ -297,8 +317,23 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             **self.data_frames_preparation_extra_params,
         )
 
+    @property
+    def task_dir(self) -> str:
+        """Directory this run writes its artifacts to (see :mod:`mars_rec.utils.files`)."""
+        return get_task_dir(self.__class__, self.task_id)
+
     def output(self):
-        return luigi.LocalTarget(get_task_dir(self.__class__, self.task_id))
+        """The ``_SUCCESS`` marker, written only once the run has finished.
+
+        A directory left behind by a run that was killed mid-way therefore no
+        longer counts as done. Use :attr:`task_dir` for the run directory.
+        """
+        return luigi.LocalTarget(get_success_marker_path(self.task_dir))
+
+    def complete(self) -> bool:
+        """Done when ``_SUCCESS`` exists (or for a finished run of an older version, see
+        :func:`~mars_rec.utils.files.is_complete_run`)."""
+        return is_complete_run(self.task_dir)
 
     @property
     def project_config(self) -> ProjectConfig:
@@ -307,7 +342,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         return self._project_config
 
     def _save_params(self):
-        with open(get_params_path(self.output().path), "w") as params_file:
+        with open(get_params_path(self.task_dir), "w") as params_file:
             json.dump(self.param_kwargs, params_file, default=lambda o: dict(o), indent=4)
 
     @property
@@ -473,7 +508,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             del self._creating_index_mapping
             del df
 
-            with open(get_index_mapping_path(self.source_task_dir), "wb") as f:
+            with open(ensure_parent_dir(get_index_mapping_path(self.source_task_dir)), "wb") as f:
                 pickle.dump(self._index_mapping, f)
 
             if new_scalar or new_array:
@@ -583,7 +618,7 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         self.index_mapping
 
     def run(self):
-        os.makedirs(self.output().path, exist_ok=True)
+        os.makedirs(self.task_dir, exist_ok=True)
 
         self.seed_everything()
         self.before_run()
@@ -592,10 +627,14 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         try:
             self.train()
         except Exception:
-            shutil.rmtree(self.output().path)
+            shutil.rmtree(self.task_dir)
             raise
         finally:
             gc.collect()
+
+        # Last step: from now on Luigi (and ``complete()``) treat the run as done.
+        with open(get_success_marker_path(self.task_dir), "w"):
+            pass
 
 
 class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
@@ -744,7 +783,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         val_loader = self.get_val_generator()
         module = self.create_module()
 
-        summary_path = os.path.join(self.output().path, "summary.txt")
+        summary_path = ensure_parent_dir(get_summary_path(self.task_dir))
         with open(summary_path, "w") as summary_file:
             with redirect_stdout(summary_file):
                 sample_input = self.get_sample_batch()
@@ -760,7 +799,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             replace=True,
             random_state=int(self.seed),
         )
-        sample_data.to_csv(os.path.join(self.output().path, "sample_train.csv"))
+        sample_data.to_csv(ensure_parent_dir(get_sample_train_path(self.task_dir)))
 
         # Companion artifact: raw (pre-indexing) values of the project-declared
         # sample_keys_columns, sliced at the same sample_idx so each row in
@@ -774,7 +813,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             sample_keys = self._train_data_frame_raw_keys.loc[sample_data.index].copy()
             sample_keys.insert(0, "row_idx", range(len(sample_keys)))
             sample_keys.to_csv(
-                os.path.join(self.output().path, "sample_train_keys.csv"),
+                ensure_parent_dir(get_sample_train_keys_path(self.task_dir)),
                 index=False,
             )
 
@@ -794,7 +833,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 module,
                 self.project_config,
                 viz_params,
-                os.path.join(self.output().path, "architecture.svg"),
+                get_architecture_path(self.task_dir),
                 index_mapping=self.index_mapping,
                 trace=True,
                 device=self.device,
@@ -813,7 +852,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
 
         self._convert_history_csv(trainer)
 
-        history_df = pd.read_csv(get_history_path(self.output().path))
+        history_df = pd.read_csv(get_history_path(self.task_dir))
 
         model_name = self.recommender_module_class.split(".")[-1]
         plot_meta = self._plot_metadata()
@@ -824,7 +863,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             extra_info=plot_meta,
         )
         history_fig.savefig(
-            os.path.join(self.output().path, "plot_history.jpg"),
+            ensure_parent_dir(get_plot_history_path(self.task_dir)),
             dpi=150,
             bbox_inches="tight",
         )
@@ -832,6 +871,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
 
         self.after_fit()
         self.evaluate()
+        self._save_eval_results(self._eval_results_dict())
         self._save_metadata()
         self.cache_cleanup()
 
@@ -856,7 +896,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         register the training run and replicate the experiment."""
         from datetime import datetime, timezone
 
-        output_dir = self.output().path
+        output_dir = self.task_dir
         train_duration = time.time() - getattr(self, "_train_start_time", time.time())
 
         # --- Model info ---
@@ -910,11 +950,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             data_info["n_users"] = len(self.train_data_frame[self.project_config.user_column.name].unique())
 
         # --- Artifacts list ---
-        artifacts = (
-            sorted(fname for fname in os.listdir(output_dir) if os.path.isfile(os.path.join(output_dir, fname)))
-            if os.path.isdir(output_dir)
-            else []
-        )
+        artifacts = list_artifacts(output_dir) if os.path.isdir(output_dir) else []
 
         # --- Build metadata ---
         metadata = {
@@ -973,7 +1009,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             "artifacts": artifacts,
         }
 
-        metadata_path = os.path.join(output_dir, "metadata.json")
+        metadata_path = get_metadata_path(output_dir)
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2, default=str)
         logger.info("Metadata saved → %s", metadata_path)
@@ -991,19 +1027,47 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         """The actual task directory on disk.
 
         When a task is reconstructed for re-evaluation, Luigi may compute
-        a different ``task_id`` hash, so ``output().path`` may not match
+        a different ``task_id`` hash, so :attr:`task_dir` may not match
         the real directory. Set ``_source_task_dir`` to override.
         """
-        return getattr(self, "_source_task_dir", None) or self.output().path
+        return getattr(self, "_source_task_dir", None) or self.task_dir
 
     @property
     def eval_output_dir(self) -> str:
-        """Directory where evaluation artifacts (plots, predictions) are saved.
+        """Directory where evaluation artifacts (metrics, predictions, plots) are saved.
 
-        Defaults to ``source_task_dir``, but can be overridden via
-        ``_eval_output_dir`` for external-data evaluation.
+        Defaults to ``eval/test/`` inside ``source_task_dir``; :func:`run_evaluate`
+        overrides it via ``_eval_output_dir`` for named / external evaluations.
         """
-        return getattr(self, "_eval_output_dir", None) or self.source_task_dir
+        return getattr(self, "_eval_output_dir", None) or get_eval_dir(self.source_task_dir, DEFAULT_EVAL_NAME)
+
+    def _eval_results_dict(self) -> Dict[str, Any]:
+        """Metrics of the latest evaluation, in the ``metrics.json`` format."""
+        results: Dict[str, Any] = {}
+        if hasattr(self, "_eval_results"):
+            results["val_metrics"] = self._eval_results
+        if hasattr(self, "_ranking_metrics"):
+            results["ranking_metrics"] = self._ranking_metrics
+        if hasattr(self, "_roc_auc_metrics"):
+            results["roc_auc_metrics"] = self._roc_auc_metrics
+        return results
+
+    def _save_eval_results(self, results: Dict[str, Any]) -> str:
+        """Merge ``results`` into ``metrics.json`` of :attr:`eval_output_dir` and return its path.
+
+        Merging (instead of overwriting) keeps the test metrics when only the
+        validation split is re-evaluated, and vice versa.
+        """
+        path = ensure_parent_dir(get_eval_results_path(self.eval_output_dir))
+        merged: Dict[str, Any] = {}
+        if os.path.exists(path):
+            with open(path) as f:
+                merged = json.load(f)
+        merged.update(results)
+        with open(path, "w") as f:
+            json.dump(merged, f, indent=2, default=str)
+        logger.info("Eval results saved → %s", path)
+        return path
 
     def _evaluate_on_dataloader(self, dataloader: DataLoader) -> Dict[str, Any]:
         """Run Lightning validation on any dataloader and return metrics dict."""
@@ -1130,8 +1194,10 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         callbacks = [
             *self._get_extra_callbacks(),
             ModelCheckpoint(
-                dirpath=self.output().path,
-                filename="weights",
+                dirpath=get_model_dir(self.task_dir),
+                filename=CHECKPOINT_NAME,
+                # Always overwrite ``weights.ckpt`` instead of writing ``weights-v1.ckpt``.
+                enable_version_counter=False,
                 save_top_k=1,
                 monitor=self.monitor_metric,
                 mode=self.monitor_mode,
@@ -1157,7 +1223,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
 
     def _get_loggers(self):
         # CSVLogger is the source of ``history.csv`` and always runs.
-        loggers = [CSVLogger(save_dir=self.output().path, name="lightning_logs", version="")]
+        loggers = [CSVLogger(save_dir=get_training_logs_dir(self.task_dir), name="lightning_logs", version="")]
         # TensorBoard logging is optional (``pip install "mars-rec[tensorboard]"``):
         # Lightning's TensorBoardLogger needs ``tensorboard`` or ``tensorboardX``.
         if _tensorboard_available():
@@ -1204,7 +1270,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         if "step" in epoch_df.columns:
             epoch_df = epoch_df.drop(columns=["step"])
 
-        epoch_df.to_csv(get_history_path(self.output().path), index=False)
+        epoch_df.to_csv(ensure_parent_dir(get_history_path(self.task_dir)), index=False)
 
     def get_trained_module(self) -> nn.Module:
         """Rebuild the model and load the best ``weights*.ckpt`` of this run, in eval mode.
@@ -1231,17 +1297,9 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         module.eval()
         return module
 
-    def _find_best_checkpoint(self) -> str:
-        """Find the best Lightning checkpoint file."""
-        task_dir = self.source_task_dir
-        # Lightning ModelCheckpoint saves as weights.ckpt (or weights-v1.ckpt, etc.)
-        import glob as glob_module
-
-        ckpt_files = glob_module.glob(os.path.join(task_dir, "weights*.ckpt"))
-        if ckpt_files:
-            # Return the most recently modified
-            return max(ckpt_files, key=os.path.getmtime)
-        return None
+    def _find_best_checkpoint(self) -> Optional[str]:
+        """Find the best Lightning checkpoint file (see :func:`~mars_rec.utils.files.find_checkpoint`)."""
+        return find_checkpoint(self.source_task_dir)
 
     def _save_sample_train_scores(self) -> None:
         """Score the 100 rows in ``sample_train.csv`` with the trained model
@@ -1259,7 +1317,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         ``sample_train.csv`` is not present (e.g. ``run()`` aborted before
         the sample was written).
         """
-        sample_path = os.path.join(self.output().path, "sample_train.csv")
+        sample_path = get_sample_train_path(self.task_dir)
         if not os.path.exists(sample_path):
             return
 
@@ -1310,7 +1368,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 len(df_sample),
             )
 
-        out_path = os.path.join(self.output().path, "sample_train_scores.csv")
+        out_path = ensure_parent_dir(get_sample_train_scores_path(self.task_dir))
         pd.DataFrame(
             {
                 "row_idx": list(range(len(all_scores))),
@@ -1584,7 +1642,7 @@ class SupervisedModelTraining(TorchModelTraining):
             extra_info=self._plot_metadata(),
         )
         fig.savefig(
-            os.path.join(self.eval_output_dir, "plot_scores.png"),
+            ensure_parent_dir(get_eval_plot_path(self.eval_output_dir, "scores")),
             dpi=150,
             bbox_inches="tight",
         )
@@ -1686,7 +1744,7 @@ class SupervisedModelTraining(TorchModelTraining):
             task_id=self.task_id,
             extra_info=meta,
         )
-        fig.savefig(os.path.join(out_dir, "plot_confusion_matrix.png"), dpi=150, bbox_inches="tight")
+        fig.savefig(ensure_parent_dir(get_eval_plot_path(out_dir, "confusion_matrix")), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # ROC Curve
@@ -1697,7 +1755,7 @@ class SupervisedModelTraining(TorchModelTraining):
             task_id=self.task_id,
             extra_info=meta,
         )
-        fig.savefig(os.path.join(out_dir, "plot_roc_curve.png"), dpi=150, bbox_inches="tight")
+        fig.savefig(ensure_parent_dir(get_eval_plot_path(out_dir, "roc_curve")), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # Precision-Recall Curve
@@ -1708,7 +1766,9 @@ class SupervisedModelTraining(TorchModelTraining):
             task_id=self.task_id,
             extra_info=meta,
         )
-        fig.savefig(os.path.join(out_dir, "plot_precision_recall_curve.png"), dpi=150, bbox_inches="tight")
+        fig.savefig(
+            ensure_parent_dir(get_eval_plot_path(out_dir, "precision_recall_curve")), dpi=150, bbox_inches="tight"
+        )
         plt.close(fig)
 
     @property
@@ -1993,7 +2053,7 @@ class SupervisedModelTraining(TorchModelTraining):
                 for metric_name, value in self._roc_auc_metrics.items():
                     logger.info("  %-20s %.4f", metric_name, value)
 
-        predictions_path = get_test_set_predictions_path(self.eval_output_dir)
+        predictions_path = ensure_parent_dir(get_test_set_predictions_path(self.eval_output_dir))
         df.to_csv(predictions_path, index=False)
         logger.info("Test predictions saved → %s", predictions_path)
 
@@ -2169,7 +2229,7 @@ class SupervisedModelTraining(TorchModelTraining):
     def after_fit(self):
         """Run the base hook, then score the test split.
 
-        When ``test_size > 0`` it writes ``test_set_predictions.csv`` and, with
+        When ``test_size > 0`` it writes ``eval/test/predictions.csv`` and, with
         ``ranking_metrics=True``, computes NDCG / HitRate / MRR / MAP and ROC-AUC
         for ``metadata.json``.
         """
@@ -2212,6 +2272,7 @@ def run_evaluate(
     data_path: Optional[str] = None,
     output_dir: Optional[str] = None,
     enable_prefilter: bool = False,
+    eval_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Re-run post-training evaluation on an already-trained model.
 
@@ -2240,8 +2301,17 @@ def run_evaluate(
         data_path: Path to an external CSV or parquet file for evaluation
             (Flow 2). Must contain the same columns as the training data,
             including the target column. If ``None``, uses original splits.
-        output_dir: Directory to save evaluation artifacts (plots,
-            predictions CSV). Defaults to the task directory.
+        output_dir: Directory to save evaluation artifacts (``metrics.json``,
+            ``predictions.csv``, ``plots/``). Defaults to ``eval/<eval_name>/``
+            inside the task directory.
+        enable_prefilter: Consult ``project_config.candidate_provider_factory``
+            when generating ranking-metric candidates.
+        eval_name: Name of this evaluation, i.e. the ``eval/<eval_name>/``
+            sub-directory it is written to. Defaults to ``"test"`` for the
+            original splits and to the file name of ``data_path`` (without
+            extension) for external data. ``"test"`` is reserved for the
+            original splits. Only the ``"test"`` evaluation (without
+            ``output_dir``) refreshes ``metadata.json``.
 
     Returns:
         A dict with ``"val_metrics"``, ``"ranking_metrics"``, and
@@ -2249,6 +2319,15 @@ def run_evaluate(
     """
     if not os.path.isdir(task_dir):
         raise FileNotFoundError(f"Task directory not found: {task_dir}")
+
+    if eval_name is None:
+        eval_name = DEFAULT_EVAL_NAME if data_path is None else os.path.splitext(os.path.basename(data_path))[0]
+    validate_eval_name(eval_name)
+    if data_path is not None and eval_name == DEFAULT_EVAL_NAME and output_dir is None:
+        raise ValueError(
+            f"The evaluation name {DEFAULT_EVAL_NAME!r} is reserved for the original test split; "
+            "pass another eval_name (--name) for external data."
+        )
 
     params = get_params(task_dir)
 
@@ -2276,8 +2355,8 @@ def run_evaluate(
     # ``_get_candidate_items``.
     task._enable_prefilter = bool(enable_prefilter)
 
-    # Set output directory for eval artifacts
-    effective_output_dir = output_dir or task_dir
+    # Set output directory for eval artifacts: eval/<eval_name>/ unless overridden.
+    effective_output_dir = output_dir or get_eval_dir(task_dir, eval_name)
     os.makedirs(effective_output_dir, exist_ok=True)
     task._eval_output_dir = effective_output_dir
 
@@ -2340,14 +2419,12 @@ def run_evaluate(
             results["roc_auc_metrics"] = getattr(task, "_roc_auc_metrics", {})
 
     # --- Save results ---
-    eval_results_path = os.path.join(effective_output_dir, "eval_results.json")
-    with open(eval_results_path, "w") as f:
-        json.dump(results, f, indent=2, default=str)
-    logger.info("Eval results saved → %s", eval_results_path)
+    task._save_eval_results(results)
 
-    # Also update metadata.json in the task dir (if saving there)
-    if effective_output_dir == task_dir:
-        metadata_path = os.path.join(task_dir, "metadata.json")
+    # metadata.json summarises the canonical test evaluation only, so an
+    # external or custom-named evaluation never overwrites it.
+    if output_dir is None and eval_name == DEFAULT_EVAL_NAME:
+        metadata_path = get_metadata_path(task_dir)
         if os.path.exists(metadata_path):
             with open(metadata_path, "r") as f:
                 metadata = json.load(f)
