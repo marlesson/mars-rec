@@ -38,8 +38,8 @@ Optional: run lint automatically on every commit with `pip install pre-commit &&
 - Add or update tests under `tests/` for any behavior change. Mark heavyweight end-to-end tests with
   `@pytest.mark.slow`.
 - If you change dependencies in `pyproject.toml`, regenerate the lockfile with `make lock` and commit it.
-  To upgrade the pinned stack, follow *Upgrading dependencies* in the README.
-- See [`AGENTS.md`](AGENTS.md) for architecture details and the critical files to modify with care.
+  To upgrade the pinned stack, follow [*Upgrading the pinned stack*](https://marlesson.github.io/mars-rec/guides/dependencies/#upgrading-the-pinned-stack).
+- See [`AGENTS.md`](https://github.com/marlesson/mars-rec/blob/main/AGENTS.md) for architecture details and the critical files to modify with care.
 
 ## CI
 

@@ -142,15 +142,17 @@ class ProjectConfig(object):
     :param user_is_input: When False, ``user_column`` is loaded but not
         passed to ``forward()`` (e.g. content-only models).
     :param item_is_input: Same idea for the item column.
-    :param hist_view_column_name, hist_output_column_name,
-        timestamp_column_name: Conventional column names used by data
-        prep helpers; override only if your CSV uses different names.
+    :param hist_view_column_name: Conventional column name used by data
+        prep helpers; override only if your CSV uses a different name.
+    :param hist_output_column_name: Same as ``hist_view_column_name``.
+    :param timestamp_column_name: Same as ``hist_view_column_name``.
     :param available_items_column_name: Name of the per-row candidate
         slate column, consumed by
         :class:`InteractionsWithNegativeItemGenerationByAvailableItemsDataset`.
         Set to ``None`` to disable slate-based sampling.
-    :param n_users_column, n_items_column: Names of the (optional)
-        cardinality columns persisted alongside the train CSV.
+    :param n_users_column: Name of the (optional) user-cardinality
+        column persisted alongside the train CSV.
+    :param n_items_column: Same for the item cardinality.
     :param default_balance_fields: Columns used for over/under-sampling
         when ``sampling_strategy != "none"``.
     :param metadata_columns: Per-item content features stored once in a

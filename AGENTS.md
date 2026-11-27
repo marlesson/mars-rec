@@ -82,13 +82,18 @@ examples/                   # Reference recsys projects (public datasets, auto-d
   amazon_beauty/            # Amazon Beauty 5-core — content-based two-tower (text emb)
   movielens100k_slate/      # MovieLens 100K — slate ranking (available_items + metadata)
 
+docs/                       # Documentation site (MkDocs Material) — published to GitHub Pages
+  _ext/griffe_sphinx_roles.py  # Docs-only griffe extension: Sphinx roles → Markdown links
+  reference/api/*.md        # mkdocstrings stubs (`::: mars_rec.<module>`) — API pages are generated
+mkdocs.yml                  # Site config + nav (strict build)
+
 scripts/
   make_vertex_config.py     # Builds the Vertex AI job config used by `make vertex-run`
   make_regression_fixtures.py  # Regenerates tests/_fixtures/{legacy_artifacts,golden_history.json}
 
 tests/                      # Pytest suite (test_dataset, test_loss, test_metrics, test_meta_config, ...)
 CONTRIBUTING.md             # Branch / lint / PR workflow
-.github/                    # CI workflow, Dependabot, PR template
+.github/                    # CI + Docs workflows, Dependabot, PR template
 Makefile                    # Development / Docker / Vertex AI targets (`make lint` = ruff check + format --check)
 Dockerfile                  # CPU/GPU image (default base: pytorch/pytorch:2.14.1-cuda12.6)
 entrypoint.sh               # Container entrypoint (dataset download, Vertex AI artifact upload)
@@ -191,9 +196,10 @@ Mismatched shapes are the most common source of `RuntimeError: target size != in
 
 Columns of type `IOType.INDEXABLE` are converted from categorical values to integers before being passed to the model. The mapping is automatically created by `SupervisedModelTraining` and saved to `index_mapping.pkl`.
 
-- Index `0` is reserved for unknown/null values
-- Index `1` is reserved for padding
-- Actual values start at `2`
+- Index `0` is reserved for unknown values (never seen during training)
+- Index `1` is reserved for `None` / `NaN`
+- Index `2` is reserved for `-1` / `"-1"` (the pad token for sequence columns)
+- Actual values start at `3`
 
 Inference never returns a reserved slot as a recommendation: `build_reverse_item_mapping` drops them and `predict_top_k` masks their logits.
 
@@ -249,7 +255,7 @@ All `list/results` lookups read `output/models/SupervisedModelTraining/results/<
 ### Adding a new metric
 
 1. Add the function to `src/mars_rec/torch/metrics.py`
-2. The metric is registered automatically — just use the function name in the `metrics` list
+2. Register it in `METRIC_REGISTRY` (same file) — the registry key is the name used in the `metrics` list
 
 ### Adding a new optimizer
 
@@ -267,6 +273,15 @@ All `list/results` lookups read `output/models/SupervisedModelTraining/results/<
 - `inference.py::run_inference` is the source of truth for batch top-k prediction. It loads `params.json` + `weights.ckpt` + `index_mapping.pkl`, preprocesses the input the same way training does, and writes `{top10s, user, time}` to JSON.
 - `simulation/training.py::run_evaluate` re-builds a `SupervisedModelTraining` instance from `params.json`, points it to the existing task dir (`task._source_task_dir`), and runs the same `evaluate()` method as the original training. Two flows: original splits (`data_path=None`) or external dataset.
 - Both write/refresh `metadata.json`, which is what `list` / `results` read for ranking + ROC-AUC metrics.
+
+## Documentation
+
+The public docs live in `docs/` and are built with MkDocs Material + mkdocstrings (`make docs`, strict;
+`make docs-serve` for live preview; install with `pip install -e ".[docs]"`). When you change
+user-facing behavior (CLI options, training parameters, `ProjectConfig` fields, registries), update
+the matching page under `docs/` in the same PR. The API reference is generated from docstrings, so keep
+docstring parameters in sync with signatures — the strict build fails on mismatches. The example
+tutorials include source files via `--8<--` snippets, so they never need manual syncing.
 
 ## Critical files (modify with care)
 
@@ -286,16 +301,25 @@ These dictionaries map configuration strings to Python classes:
 
 ```python
 TORCH_OPTIMIZERS = {
-    "adam": Adam, "sgd": SGD, "rmsprop": RMSprop,
+    "adam": Adam, "adamw": AdamW, "sgd": SGD, "rmsprop": RMSprop,
     "radam": RAdam, "adadelta": Adadelta, "adagrad": Adagrad, "adamax": Adamax
+}
+
+TORCH_LR_SCHEDULERS = {
+    "reduce_on_plateau": ReduceLROnPlateau, "cosine_annealing": CosineAnnealingLR,
+    "cosine_warm_restarts": CosineAnnealingWarmRestarts, "step": StepLR
 }
 
 TORCH_LOSS_FUNCTIONS = {
     "bce": BCELoss, "mse": MSELoss, "nll": NLLLoss, "ce": CrossEntropyLoss,
-    "bce_logits": BCEWithLogitsLoss, "mlm": MultiLabelMarginLoss,
-    "focal_loss": FocalLoss, "implicit_feedback_bce": ImplicitFeedbackBCELoss,
-    "dummy": DummyLoss
+    "bce_logits": BCEWithLogitsLoss, "bce_logits_smooth": BCEWithLogitsLossSmooth,
+    "bpr": BPRLoss, "ranknet": RankNetLoss, "lambdarank": LambdaRankLoss,
+    "mlm": MultiLabelMarginLoss, "focal_loss": FocalLoss,
+    "implicit_feedback_bce": ImplicitFeedbackBCELoss, "dummy": DummyLoss,
+    # Embedding losses (EmbeddingRecommenderLightningModule):
+    "infonce": InfoNCELoss, "cosine_similarity": CosineSimilarityLoss, "hardneg_infonce": HardNegInfoNCELoss
 }
+# Losses that consume logits must also be listed in torch/lightning_module.py::_LOGIT_LOSSES.
 
 TORCH_ACTIVATION_FUNCTIONS = {
     "relu": F.relu, "selu": F.selu, "tanh": F.tanh, "sigmoid": F.sigmoid, "linear": F.linear

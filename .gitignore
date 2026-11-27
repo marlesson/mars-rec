@@ -48,6 +48,9 @@ ENV/
 # Output folders
 output/
 
+# MkDocs build output
+site/
+
 # Python bytecode cache
 src/mars_rec/**/__pycache__/
 examples/**/__pycache__/
