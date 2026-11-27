@@ -88,7 +88,7 @@ class TestIndexMappingReuse:
 
         from mars_rec.meta_config import IOType
         from mars_rec.simulation.training import SupervisedModelTraining
-        from mars_rec.utils.files import get_index_mapping_path
+        from mars_rec.utils.files import ensure_parent_dir, get_index_mapping_path
 
         task = _task()
         task._source_task_dir = str(tmp_path)
@@ -98,7 +98,7 @@ class TestIndexMappingReuse:
             for c in cfg.all_columns
             if c.type in (IOType.INDEXABLE, IOType.INDEXABLE_ARRAY)
         }
-        with open(get_index_mapping_path(str(tmp_path)), "wb") as f:
+        with open(ensure_parent_dir(get_index_mapping_path(str(tmp_path))), "wb") as f:
             pickle.dump(mapping, f)
 
         def _must_not_read(self):
