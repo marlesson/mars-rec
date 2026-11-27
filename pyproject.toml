@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mars-rec"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MARS-Rec: framework to model, train, and evaluate deep-learning recommendation systems (successor of MARS-Gym Lite)."
 license = { text = "MIT" }
 readme = "README.md"
@@ -64,6 +64,9 @@ docs = [
 
 [project.urls]
 Homepage = "https://github.com/marlesson/mars-rec"
+Documentation = "https://marlesson.github.io/mars-rec/"
+Source = "https://github.com/marlesson/mars-rec"
+Issues = "https://github.com/marlesson/mars-rec/issues"
 
 [project.scripts]
 mars-rec = "mars_rec.cli:cli"
@@ -71,6 +74,11 @@ mars-rec = "mars_rec.cli:cli"
 # -----------------------------------------------------------------------------
 # Build backend (hatchling)
 # -----------------------------------------------------------------------------
+# Single source of truth for the version: ``mars_rec.__version__``.
+# The release workflow checks that the pushed ``v*`` tag matches it.
+[tool.hatch.version]
+path = "src/mars_rec/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mars_rec"]
 

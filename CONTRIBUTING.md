@@ -51,3 +51,22 @@ Every PR and every push to `main` runs:
 | `test` | `pytest` on Python 3.11 and 3.13 against the pinned `requirements.lock` (CPU-only torch) |
 | `test-latest` | `pytest` on the newest versions allowed by `pyproject.toml`; non-blocking early warning |
 | `audit` | `pip-audit` on `requirements.lock` (also runs weekly) |
+
+## Releasing
+
+Releases are published to [PyPI](https://pypi.org/project/mars-rec/) by the `Release` workflow
+(`.github/workflows/release.yml`) using PyPI Trusted Publishing, so no API token is stored in the repository.
+
+1. Open a PR that bumps `__version__` in `src/mars_rec/__init__.py` (the only place the version lives;
+   `pyproject.toml` reads it). Follow [Semantic Versioning](https://semver.org/).
+2. After it is merged, tag the merge commit on `main` and push the tag:
+   ```bash
+   git switch main && git pull
+   git tag -a v0.2.0 -m "v0.2.0"
+   git push origin v0.2.0
+   ```
+3. The workflow checks that the tag matches `__version__`, builds the sdist + wheel, smoke-tests the wheel,
+   publishes to PyPI (job environment `pypi`) and creates a GitHub Release with generated notes.
+
+A published version can never be re-uploaded to PyPI: if something goes wrong after publishing, bump the
+patch version and release again.

@@ -27,6 +27,12 @@ evaluation** pipeline built on Luigi, PyTorch and PyTorch Lightning.
 Python 3.11–3.13.
 
 ```bash
+pip install mars-rec
+```
+
+From source (to run the bundled `examples/` or contribute):
+
+```bash
 git clone https://github.com/marlesson/mars-rec.git
 cd mars-rec
 python -m venv .venv && source .venv/bin/activate
@@ -101,8 +107,8 @@ To preview the docs locally: `pip install -e ".[docs]" && make docs-serve`.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the branch, lint and pull request workflow.
-AI agents should also read [`AGENTS.md`](AGENTS.md).
+See [`CONTRIBUTING.md`](https://github.com/marlesson/mars-rec/blob/main/CONTRIBUTING.md) for the branch, lint and pull request workflow.
+AI agents should also read [`AGENTS.md`](https://github.com/marlesson/mars-rec/blob/main/AGENTS.md).
 
 ## License
 
