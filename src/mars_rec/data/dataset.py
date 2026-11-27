@@ -215,6 +215,77 @@ def _choose_from_pool_except(pool: np.ndarray, exception: int) -> int:
     return int(others[np.random.randint(0, len(others))]) if others.size else int(pool[0])
 
 
+_MAX_REJECTION_ROUNDS = 32
+
+
+def _choose_from_pool_except_batch(pool: np.ndarray, exceptions: np.ndarray) -> np.ndarray:
+    """Vectorised :func:`_choose_from_pool_except`: one uniform draw per entry of ``exceptions``.
+
+    Draws the whole batch at once and redraws only the entries that hit
+    their exception (rejection sampling), so each result is uniform over
+    ``pool`` minus that entry's exception, as with the scalar version.
+    The rare entries still colliding after a few rounds fall back to it.
+    """
+    exceptions = np.asarray(exceptions, dtype=np.int64).reshape(-1)
+    n = len(pool)
+    if n == 0:
+        return exceptions.copy()
+    if n == 1:
+        return np.full(len(exceptions), int(pool[0]), dtype=np.int64)
+    picks = np.asarray(pool, dtype=np.int64)[np.random.randint(0, n, size=len(exceptions))]
+    for _ in range(_MAX_REJECTION_ROUNDS):
+        clash = np.flatnonzero(picks == exceptions)
+        if clash.size == 0:
+            return picks
+        picks[clash] = pool[np.random.randint(0, n, size=clash.size)]
+    for i in np.flatnonzero(picks == exceptions):
+        picks[i] = _choose_from_pool_except(pool, int(exceptions[i]))
+    return picks
+
+
+def _pack_ragged(rows: Any) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """Pack per-row integer lists into ``(padded_matrix, lengths)``, or ``None`` if not integer."""
+    lengths = np.fromiter((len(r) for r in rows), dtype=np.int64, count=len(rows))
+    width = int(lengths.max()) if len(lengths) else 0
+    matrix = np.zeros((len(rows), max(width, 1)), dtype=np.int64)
+    try:
+        for i, r in enumerate(rows):
+            if len(r):
+                matrix[i, : len(r)] = r
+    except (TypeError, ValueError):
+        return None
+    return matrix, lengths
+
+
+def _choose_row_except_batch(
+    matrix: np.ndarray, lengths: np.ndarray, rows: np.ndarray, exceptions: np.ndarray
+) -> np.ndarray:
+    """Vectorised :func:`_choose_except` over rows of a padded matrix.
+
+    For each ``rows[i]`` draws uniformly among the first ``lengths[rows[i]]``
+    entries of that row that differ from ``exceptions[i]`` (duplicates keep
+    their weight, as in the scalar version). Rows with no such entry return
+    the row's first value, or the exception when the row is empty.
+    """
+    rows = np.asarray(rows, dtype=np.int64).reshape(-1)
+    exceptions = np.asarray(exceptions, dtype=np.int64).reshape(-1)
+    row_len = lengths[rows]
+    picks = exceptions.copy()
+    todo = np.flatnonzero(row_len > 0)
+    for _ in range(_MAX_REJECTION_ROUNDS):
+        if todo.size == 0:
+            return picks
+        cols = (np.random.random_sample(todo.size) * row_len[todo]).astype(np.int64)
+        drawn = matrix[rows[todo], cols]
+        ok = drawn != exceptions[todo]
+        picks[todo[ok]] = drawn[ok]
+        todo = todo[~ok]
+    for i in todo:
+        values = matrix[rows[i], : row_len[i]].tolist()
+        picks[i] = _choose_except(values, int(exceptions[i]))
+    return picks
+
+
 def _choice_except(probs: np.ndarray, exception: int) -> Optional[int]:
     """Draw an index from ``probs`` with ``exception``'s mass removed.
 
@@ -459,6 +530,10 @@ class InteractionsDataset(Dataset):
         """Uniform negative from :attr:`_negative_item_pool`, avoiding ``exclude``."""
         return _choose_from_pool_except(self._negative_item_pool, int(exclude))
 
+    def _random_negatives(self, excludes: np.ndarray) -> np.ndarray:
+        """Batch :meth:`_random_negative`: one negative per entry of ``excludes``."""
+        return _choose_from_pool_except_batch(self._negative_item_pool, excludes)
+
     def _resample_except(self, probs: np.ndarray, exclude: int) -> int:
         """Redraw from ``probs`` avoiding ``exclude``; uniform pool fallback when it holds all the mass."""
         pick = _choice_except(probs, exclude)
@@ -532,9 +607,7 @@ class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):
             negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             negative_input = list(negative_input)
-            negative_input[self._item_input_index] = np.array(
-                [self._random_negative(item_idx) for item_idx in negative_input[self._item_input_index]]
-            )
+            negative_input[self._item_input_index] = self._random_negatives(negative_input[self._item_input_index])
             self._relookup_metadata(
                 negative_input,
                 negative_input[self._item_input_index],
@@ -599,6 +672,21 @@ class InteractionsWithNegativeItemGenerationByAvailableItemsDataset(Interactions
     def __len__(self) -> int:
         return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
+    def _choose_available_negatives(self, rows: np.ndarray, positives: np.ndarray) -> np.ndarray:
+        """One negative per row, drawn from that row's available items minus its positive.
+
+        Packs the per-row lists into a padded matrix on first use so a batch
+        is sampled with array operations instead of a Python loop per row.
+        """
+        packed = self.__dict__.get("_available_items_packed")
+        if packed is None:
+            packed = _pack_ragged(self._available_items) or False
+            self._available_items_packed = packed
+        if packed is False:  # non-integer items: keep the per-row path
+            return np.array([_choose_except(self._available_items[r], p) for r, p in zip(rows, positives)])
+        matrix, lengths = packed
+        return _choose_row_except_batch(matrix, lengths, rows, positives)
+
     def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
@@ -620,11 +708,8 @@ class InteractionsWithNegativeItemGenerationByAvailableItemsDataset(Interactions
             )
 
             negative_input = list(negative_input)
-            negative_input[self._item_input_index] = np.array(
-                [
-                    _choose_except(self._available_items[index], item_idx)
-                    for index, item_idx in zip(negative_indices, negative_input[self._item_input_index])
-                ]
+            negative_input[self._item_input_index] = self._choose_available_negatives(
+                np.asarray(negative_indices, dtype=np.int64), negative_input[self._item_input_index]
             )
             negative_input = self._apply_candidate_features(
                 negative_input,
@@ -833,8 +918,7 @@ class InteractionsWithHardNegativeMiningDataset(InteractionsDataset):
                     new_items[i] = self._random_negative(original_items[i])
 
             # Random negatives for the rest
-            for i in range(num_hard, num_of_negatives):
-                new_items[i] = self._random_negative(original_items[i])
+            new_items[num_hard:] = self._random_negatives(original_items[num_hard:])
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
@@ -927,9 +1011,7 @@ class InteractionsWithInBatchNegativesDataset(InteractionsDataset):
             negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             negative_input = list(negative_input)
-            negative_input[self._item_input_index] = np.array(
-                [self._random_negative(item_idx) for item_idx in negative_input[self._item_input_index]]
-            )
+            negative_input[self._item_input_index] = self._random_negatives(negative_input[self._item_input_index])
             negative_input = self._apply_candidate_features(
                 negative_input,
                 negative_input[self._item_input_index],
@@ -1084,10 +1166,7 @@ class InteractionsWithTimeAwareNegativeSamplingDataset(InteractionsDataset):
                     dtype=np.int64,
                 )
             else:
-                new_items = np.array(
-                    [self._random_negative(item_idx) for item_idx in original_items],
-                    dtype=np.int64,
-                )
+                new_items = self._random_negatives(original_items)
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items

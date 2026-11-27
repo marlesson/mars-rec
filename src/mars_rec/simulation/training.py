@@ -295,6 +295,8 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             "_val_data_frame",
             "_train_data_frame",
             "_metadata_data_frame",
+            "_cached_trained_module",
+            "_cached_dataset_forward",
         ]
 
     def requires(self):
@@ -960,8 +962,10 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         output_dir = self.task_dir
         train_duration = time.time() - getattr(self, "_train_start_time", time.time())
 
-        # --- Model info ---
-        module = self.create_module()
+        # --- Model info --- (reuse the loaded model; building one only to count is costly)
+        module = getattr(self, "_cached_trained_module", None)
+        if module is None:
+            module = self.create_module()
         n_parameters = sum(p.numel() for p in module.parameters())
         n_trainable = sum(p.numel() for p in module.parameters() if p.requires_grad)
 
@@ -1134,7 +1138,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
 
     def _evaluate_on_dataloader(self, dataloader: DataLoader) -> Dict[str, Any]:
         """Run Lightning validation on any dataloader and return metrics dict."""
-        module = self.get_trained_module()
+        module = self._get_cached_trained_module()
         lit_module = self.create_lightning_module(module)
         trainer = pl.Trainer(
             accelerator=self._get_accelerator(),
@@ -1153,8 +1157,8 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         :meth:`SupervisedModelTraining.after_fit`.
         """
         # Free the train / test splits before evaluating, but keep the
-        # validation split: it is the one about to be scored.
-        self.cache_cleanup(keep=("_val_data_frame", "_val_dataset"))
+        # validation split (about to be scored) and the loaded model.
+        self.cache_cleanup(keep=("_val_data_frame", "_val_dataset", "_cached_trained_module"))
         val_loader = self.get_val_generator()
         banner("Evaluation (validation set)", logger=logger)
         self._eval_results = self._evaluate_on_dataloader(val_loader)
@@ -1362,6 +1366,55 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         module.eval()
         return module
 
+    def _get_cached_trained_module(self) -> nn.Module:
+        """:meth:`get_trained_module`, loaded from the checkpoint once per task instance.
+
+        Every post-training step (sample scores, test predictions, ROC-AUC,
+        validation) scores with the same weights, so they share one copy
+        instead of rebuilding the model and re-reading the checkpoint each
+        time. Only call it after ``trainer.fit`` has written the checkpoint.
+        Released by :meth:`cache_cleanup`.
+        """
+        if not hasattr(self, "_cached_trained_module"):
+            self._cached_trained_module = self.get_trained_module().to(self.torch_device)
+        # Lightning's validate() may leave the module in train mode.
+        return self._cached_trained_module.eval()
+
+    def _forward_dataset(self, dataset: Dataset) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Score every row of ``dataset`` with the trained model.
+
+        Returns ``(scores, targets)`` on CPU, concatenated along the batch
+        dimension (``scores`` is ``[N]`` or ``[N, C]``). The result for the
+        last dataset scored is cached, so the test-set plots and ROC-AUC,
+        which read the same split, run the forward pass once.
+        """
+        cached = self.__dict__.get("_cached_dataset_forward")
+        if cached is not None and cached[0] is dataset:
+            return cached[1]
+
+        batch_sampler = FasterBatchSampler(dataset, self.batch_size, shuffle=False)
+        generator = NoAutoCollationDataLoader(
+            dataset,
+            batch_sampler=batch_sampler,
+            num_workers=self.generator_workers,
+            pin_memory=self.pin_memory if self.device == "cuda" else False,
+        )
+        model = self._get_cached_trained_module()
+
+        all_scores: List[torch.Tensor] = []
+        all_targets: List[torch.Tensor] = []
+        with torch.no_grad():
+            for x, y in generator:
+                input_params = x if isinstance(x, (list, tuple)) else [x]
+                input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
+                all_scores.append(model.recommendation_score(*input_params).cpu())
+                target = y[0] if isinstance(y, (list, tuple)) else y
+                all_targets.append(target.cpu())
+
+        result = (torch.cat(all_scores, dim=0), torch.cat(all_targets, dim=0))
+        self._cached_dataset_forward = (dataset, result)
+        return result
+
     def _find_best_checkpoint(self) -> Optional[str]:
         """Find the best Lightning checkpoint file (see :func:`~mars_rec.utils.files.find_checkpoint`)."""
         return find_checkpoint(self.source_task_dir)
@@ -1413,9 +1466,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             pin_memory=False,
         )
 
-        model = self.get_trained_module()
-        model.to(self.torch_device)
-        model.eval()
+        model = self._get_cached_trained_module()
 
         all_scores: List[float] = []
         with torch.no_grad():
@@ -1657,13 +1708,6 @@ class SupervisedModelTraining(TorchModelTraining):
         self._cached_full_catalog_idx = real_indices(item_map)
         return self._cached_full_catalog_idx
 
-    def _get_cached_trained_module(self) -> nn.Module:
-        """Return the trained module, loading from checkpoint only once."""
-        if not hasattr(self, "_cached_trained_module"):
-            self._cached_trained_module = self.get_trained_module()
-            self._cached_trained_module.to(self.torch_device)
-        return self._cached_trained_module
-
     def _get_item_scores(self, ob_dataset: Dataset) -> np.ndarray:
         """Score items using the trained model. Returns a 1-D numpy array."""
         batch_sampler = FasterBatchSampler(ob_dataset, self.batch_size, shuffle=False)
@@ -1718,34 +1762,9 @@ class SupervisedModelTraining(TorchModelTraining):
 
         Returns (y_true, y_scores) as numpy arrays.
         """
-        test_dataset = self.test_dataset
-        batch_sampler = FasterBatchSampler(test_dataset, self.batch_size, shuffle=False)
-        generator = NoAutoCollationDataLoader(
-            test_dataset,
-            batch_sampler=batch_sampler,
-            num_workers=self.generator_workers,
-            pin_memory=self.pin_memory if self.device == "cuda" else False,
-        )
-
-        model = self.get_trained_module()
-        model.to(self.torch_device)
-        model.eval()
-
-        all_scores = []
-        all_targets = []
-
-        with torch.no_grad():
-            for x, y in generator:
-                input_params = x if isinstance(x, (list, tuple)) else [x]
-                input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
-                scores_tensor = model.recommendation_score(*input_params)
-                all_scores.extend(scores_tensor.cpu().numpy().reshape(-1).tolist())
-
-                target = y[0] if isinstance(y, (list, tuple)) else y
-                all_targets.extend(target.cpu().numpy().reshape(-1).tolist())
-
-        y_true = np.array(all_targets)
-        y_scores = np.array(all_scores)
+        scores, targets = self._forward_dataset(self.test_dataset)
+        y_true = targets.numpy().reshape(-1)
+        y_scores = scores.numpy().reshape(-1)
 
         # Only apply sigmoid if the loss function expects logits (model outputs raw logits)
         logit_loss_functions = {
@@ -2084,34 +2103,8 @@ class SupervisedModelTraining(TorchModelTraining):
         """
         from sklearn.metrics import roc_auc_score
 
-        test_dataset = self._get_roc_auc_dataset()
-        batch_sampler = FasterBatchSampler(test_dataset, self.batch_size, shuffle=False)
-        generator = NoAutoCollationDataLoader(
-            test_dataset,
-            batch_sampler=batch_sampler,
-            num_workers=self.generator_workers,
-            pin_memory=self.pin_memory if self.device == "cuda" else False,
-        )
-
-        model = self.get_trained_module()
-        model.to(self.torch_device)
-        model.eval()
-
-        all_logits = []
-        all_targets = []
-
-        with torch.no_grad():
-            for x, y in generator:
-                input_params = x if isinstance(x, (list, tuple)) else [x]
-                input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
-                logits = model.recommendation_score(*input_params).cpu()
-                all_logits.append(logits)
-
-                target = y[0] if isinstance(y, (list, tuple)) else y
-                all_targets.append(target.cpu())
-
-        all_logits = torch.cat(all_logits, dim=0)  # [N, C] or [N]
-        all_targets = torch.cat(all_targets, dim=0)  # [N]
+        # Same forward pass as the test-set plots when no subsample is drawn.
+        all_logits, all_targets = self._forward_dataset(self._get_roc_auc_dataset())  # [N, C] or [N], [N]
         y_true = all_targets.numpy().astype(int)
 
         is_multiclass = all_logits.dim() == 2 and all_logits.size(1) > 1
