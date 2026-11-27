@@ -2,9 +2,9 @@
 
 Highlights:
 
-- :func:`parallel_literal_eval` — multi-process parsing of CSV cells
-  holding Python literals (used by the Dataset preprocessing for
-  array columns).
+- :func:`parallel_literal_eval` — parsing of CSV cells holding Python
+  literals (used by the Dataset preprocessing for array columns);
+  multi-process only for large inputs (see :func:`use_parallel`).
 - :func:`reduce_df_mem` — narrow numeric columns to the smallest dtype
   that fits, useful for big interaction frames.
 - :class:`JsonEncoder` — ``json.JSONEncoder`` subclass that handles
@@ -79,14 +79,52 @@ def chunks(l: Union[list, range], n: int) -> Union[list, range]:
         yield l[i : i + n]
 
 
+PARALLEL_MIN_ROWS_ENV = "MARS_REC_PARALLEL_MIN_ROWS"
+"""Environment variable overriding :data:`DEFAULT_PARALLEL_MIN_ROWS`."""
+
+DEFAULT_PARALLEL_MIN_ROWS = 2_000_000
+"""Row count from which per-row parsing / remapping switches to a ``multiprocessing.Pool``.
+
+Starting a pool is not free: every ``spawn`` worker re-imports the framework
+(torch, Lightning, pandas), which costs several seconds per pool on macOS. The
+work it parallelises (``json.loads`` of short lists, dict lookups) runs at
+~1M rows/s in a single process, so below a few million rows the serial path
+is faster.
+"""
+
+
+def parallel_min_rows() -> int:
+    """Row threshold for :func:`use_parallel` (``MARS_REC_PARALLEL_MIN_ROWS``, default 2M).
+
+    ``0`` forces the pool for every non-empty input; a negative value disables it.
+    """
+    raw = os.environ.get(PARALLEL_MIN_ROWS_ENV, "").strip()
+    if not raw:
+        return DEFAULT_PARALLEL_MIN_ROWS
+    try:
+        return int(raw)
+    except ValueError:
+        logging.getLogger(__name__).warning(
+            "Ignoring %s=%r (not an integer); using %d", PARALLEL_MIN_ROWS_ENV, raw, DEFAULT_PARALLEL_MIN_ROWS
+        )
+        return DEFAULT_PARALLEL_MIN_ROWS
+
+
+def use_parallel(n_rows: int) -> bool:
+    """Whether ``n_rows`` rows are worth a ``multiprocessing.Pool`` (see :func:`parallel_min_rows`)."""
+    threshold = parallel_min_rows()
+    return threshold >= 0 and n_rows > 0 and n_rows >= threshold
+
+
 def parallel_literal_eval(series: Union[pd.Series, np.ndarray], pool: Pool = None, use_tqdm: bool = True) -> list:
-    """Parse a Series of Python-literal strings in parallel.
+    """Parse a Series of Python-literal strings, in parallel for large inputs.
 
     Skips parsing when the first element is already a parsed object
     (lets callers run the function unconditionally on a column whose
-    values may have been deserialised on a previous pass). When
-    ``pool`` is ``None``, spins up a one-shot ``multiprocessing.Pool``
-    sized to ``os.cpu_count()``.
+    values may have been deserialised on a previous pass). Uses ``pool``
+    when given; otherwise spins up a one-shot ``multiprocessing.Pool``
+    only when :func:`use_parallel` says the input is large enough, and
+    parses in-process below that.
     """
     if len(series) == 0:
         return []
@@ -98,9 +136,10 @@ def parallel_literal_eval(series: Union[pd.Series, np.ndarray], pool: Pool = Non
 
     if pool:
         return _parallel_literal_eval(series, pool, use_tqdm)
-    else:
+    if use_parallel(len(series)):
         with Pool(os.cpu_count()) as p:
             return _parallel_literal_eval(series, p, use_tqdm)
+    return [literal_eval_if_str(value) for value in series]
 
 
 def literal_eval_if_str(element):

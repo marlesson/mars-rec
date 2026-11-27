@@ -26,6 +26,7 @@ tuple of numpy arrays whose order matches
 
 from typing import Callable, Tuple, List, Union, Optional, Dict, Any
 
+import contextlib
 import functools
 import inspect
 import logging
@@ -44,7 +45,7 @@ from mars_rec.data.candidate_features import (
 )
 from mars_rec.meta_config import ProjectConfig, IOType, Column
 from mars_rec.utils.index_mapping import map_array, real_indices
-from mars_rec.utils.utils import parallel_literal_eval
+from mars_rec.utils.utils import parallel_literal_eval, use_parallel
 from multiprocessing.pool import Pool
 import os
 
@@ -121,16 +122,19 @@ def preprocess_interactions_data_frame(data_frame: pd.DataFrame, project_config:
         and isinstance(data_frame.iloc[0][project_config.available_items_column_name], str)
     )
 
-    if has_array_columns or needs_available_items:
-        with Pool(os.cpu_count()) as pool:
-            literal_eval_array_columns(data_frame, all_columns, pool=pool)
+    if not (has_array_columns or needs_available_items):
+        return data_frame
 
-            if needs_available_items:
-                data_frame[project_config.available_items_column_name] = parallel_literal_eval(
-                    data_frame[project_config.available_items_column_name], pool=pool
-                )
-    else:
-        literal_eval_array_columns(data_frame, all_columns)
+    # One pool shared by every column, and only for large frames: spawning
+    # workers costs seconds, more than parsing a few million short lists.
+    pool_context = Pool(os.cpu_count()) if use_parallel(len(data_frame)) else contextlib.nullcontext()
+    with pool_context as pool:
+        literal_eval_array_columns(data_frame, all_columns, pool=pool)
+
+        if needs_available_items:
+            data_frame[project_config.available_items_column_name] = parallel_literal_eval(
+                data_frame[project_config.available_items_column_name], pool=pool
+            )
 
     return data_frame
 

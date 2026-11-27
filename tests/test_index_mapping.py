@@ -303,3 +303,62 @@ class TestTransformWithIndexing:
         }
         transform_with_indexing(df, index_mapping, project_config)
         assert len(df) == 0
+
+
+class TestTransformWithIndexingArrayPaths:
+    """The in-process and the pool path of ``INDEXABLE_ARRAY`` remapping must agree."""
+
+    @pytest.fixture
+    def config(self):
+        return ProjectConfig(
+            base_dir="/tmp/test",
+            prepare_data_frames_task=MagicMock(),
+            dataset_class=MagicMock(),
+            user_column=Column("user_id", IOType.INDEXABLE),
+            item_column=Column("item_id", IOType.INDEXABLE),
+            other_input_columns=[Column("tags", IOType.INDEXABLE_ARRAY)],
+            output_column=Column("clicked", IOType.NUMBER),
+        )
+
+    def _frame(self):
+        return pd.DataFrame(
+            {
+                "user_id": ["1", "2", "3"],
+                "item_id": ["10", "20", "10"],
+                "tags": [["a", "unseen"], [], [-1, "b"]],
+                "clicked": [1, 0, 1],
+            }
+        )
+
+    def _mapping(self):
+        return {
+            "user_id": create_index_mapping(["1", "2"]),
+            "item_id": create_index_mapping(["10", "20"]),
+            "tags": create_index_mapping(["a", "b"]),
+        }
+
+    @pytest.mark.parametrize("threshold", ["-1", "0"])
+    def test_paths_agree_and_mapping_is_not_grown(self, config, monkeypatch, threshold):
+        from mars_rec.utils.utils import PARALLEL_MIN_ROWS_ENV
+
+        monkeypatch.setenv(PARALLEL_MIN_ROWS_ENV, threshold)
+        df, mapping = self._frame(), self._mapping()
+        keys_before = {k: list(v.keys()) for k, v in mapping.items()}
+
+        transform_with_indexing(df, mapping, config)
+
+        tags = mapping["tags"]
+        assert df["tags"].tolist() == [[tags["a"], 0], [], [2, tags["b"]]]
+        assert df["user_id"].tolist() == [mapping["user_id"]["1"], mapping["user_id"]["2"], 0]
+        # Unseen array values must not be added to the shared mapping.
+        assert list(mapping["tags"].keys()) == keys_before["tags"]
+
+    def test_plain_dict_still_raises_on_unknown(self, config, monkeypatch):
+        from mars_rec.utils.utils import PARALLEL_MIN_ROWS_ENV
+
+        monkeypatch.setenv(PARALLEL_MIN_ROWS_ENV, "-1")
+        df = self._frame()
+        mapping = self._mapping()
+        mapping["tags"] = dict(mapping["tags"])
+        with pytest.raises(KeyError):
+            transform_with_indexing(df, mapping, config)
