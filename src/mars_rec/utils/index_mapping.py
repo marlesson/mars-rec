@@ -17,8 +17,9 @@ does internally).
 """
 
 import functools
+import math
 from collections import defaultdict
-from typing import Dict, Any, List, Iterable
+from typing import Dict, Any, List, Iterable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -56,6 +57,27 @@ def create_index_mapping(
         mapping["-1"] = 2  # Both pad -1 and "-1"
 
     return mapping
+
+
+def is_reserved_key(raw_val: Any) -> bool:
+    """True for the sentinel keys of :func:`create_index_mapping` (None, NaN, -1)."""
+    if raw_val is None:
+        return True
+    if isinstance(raw_val, float) and math.isnan(raw_val):
+        return True
+    return str(raw_val) == "-1"
+
+
+def real_indices(mapping: Mapping[Any, int]) -> np.ndarray:
+    """Sorted ``int64`` indices of the real values in ``mapping``.
+
+    Drops the unknown slot (``0``, which a ``defaultdict`` also hands to
+    any key looked up after construction) and the sentinel keys
+    (:func:`is_reserved_key`). This is the single definition of "a real
+    catalog item" shared by training, negative sampling and inference.
+    """
+    idx = {int(v) for k, v in mapping.items() if int(v) != 0 and not is_reserved_key(k)}
+    return np.asarray(sorted(idx), dtype=np.int64)
 
 
 def create_index_mapping_from_arrays(
