@@ -15,6 +15,7 @@ configured ``loss_function`` (see ``_EMBEDDING_LOSSES`` in
 :mod:`mars_rec.simulation.training`).
 """
 
+import logging
 from typing import Optional
 
 import torch
@@ -24,6 +25,8 @@ import pytorch_lightning as pl
 from torch.optim.optimizer import Optimizer
 
 from mars_rec.torch.metrics import METRIC_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 _LOGIT_LOSSES = {
@@ -135,10 +138,7 @@ class RecommenderLightningModule(pl.LightningModule):
                 target_shape = [getattr(t, "shape", "?") for t in targets]
             else:
                 target_shape = getattr(targets, "shape", "?")
-            print(
-                f"[DIAG] training_step batch_idx=0 input_shapes={shapes} target_shape={target_shape}",
-                flush=True,
-            )
+            logger.info("First training batch: input_shapes=%s target_shape=%s", shapes, target_shape)
         return self._shared_step(batch, "train")
 
     def on_train_epoch_end(self):

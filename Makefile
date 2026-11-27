@@ -282,6 +282,10 @@ gcp-submit: _check_gcp
 ##     --recommender-module-class examples.movielens.model.MovieLensNCF \
 ##     --epochs 10 --batch-size 256 --device cuda --no-cache"
 ##
+## JSON-valued options: wrap the JSON in single quotes inside ARGS, exactly as
+## on a shell command line (ARGS reaches the job verbatim, then shlex-split):
+##   make vertex-run ARGS="... --recommender-extra-params '{\"n_factors\": 32}' ..."
+##
 ## With GPU:
 ##   make vertex-run GPU_TYPE=NVIDIA_TESLA_T4 GPU_COUNT=1 MACHINE_TYPE=n1-standard-8 ARGS="..."
 ##
@@ -310,7 +314,7 @@ endif
 	python3 scripts/make_vertex_config.py \
 		--image $(GCR_IMAGE) \
 		--machine $(MACHINE_TYPE) \
-		--args "run supervised $(ARGS)" \
+		--args "run supervised $$ARGS" \
 		--aip-model-dir $(_JOB_OUTPUT) \
 		$(if $(DATA_URI),--data-uri $(DATA_URI),) \
 		$(if $(DATASET_GCS_PREFIX),--dataset-gcs-prefix $(DATASET_GCS_PREFIX),) \
