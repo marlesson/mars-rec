@@ -51,11 +51,14 @@ def _fence_literal_blocks(text: str) -> str:
     """Turn reST literal blocks (``para::`` + indented block) into fenced code blocks."""
     lines = text.splitlines()
     out: list[str] = []
+    in_fence = False
     i = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.rstrip()
-        if not stripped.endswith("::") or stripped.endswith(":::"):
+        if stripped.lstrip().startswith("```"):
+            in_fence = not in_fence
+        if in_fence or not stripped.endswith("::") or stripped.endswith(":::"):
             out.append(line)
             i += 1
             continue
@@ -76,7 +79,10 @@ def _fence_literal_blocks(text: str) -> str:
         block = textwrap.dedent("\n".join(lines[j:block_end]))
         lang = "python" if _PYTHON_HINT.search(block) else "text"
         intro = stripped[:-2].rstrip()  # "Algorithm::" -> "Algorithm"; bare "::" -> ""
-        pad = " " * base
+        # Top-level blocks are fenced at column 0 (a fence indented by 4 spaces would itself be
+        # an indented code block). Blocks nested in a section item (e.g. an ``Args:`` entry)
+        # keep their own indentation so they stay inside that item's description.
+        pad = " " * (_indent_of(lines[j]) if base else 0)
         if intro.strip():
             out.append(intro + ":")
             out.append("")

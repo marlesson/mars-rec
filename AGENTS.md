@@ -56,7 +56,7 @@ src/mars_rec/          # Framework source code (the only installable package)
     abstract.py             # RecommenderModule — base class for ALL models
     base_model.py           # LogisticRegression — baseline model
   simulation/
-    training.py             # SupervisedModelTraining + run_evaluate — MAIN FILE (~2.3k lines)
+    training.py             # SupervisedModelTraining + run_evaluate — MAIN FILE (~2.4k lines)
   torch/
     callbacks.py            # Lightning callbacks
     data.py                 # Custom DataLoader and BatchSampler
@@ -295,7 +295,7 @@ Pages (https://marlesson.github.io/mars-rec/) while the `DOCS_DEPLOY` repository
 
 | File | Risk | Reason |
 |---|---|---|
-| `simulation/training.py` | **High** | Full training pipeline + `run_evaluate`. ~2.3k lines. Changes can break the entire flow. |
+| `simulation/training.py` | **High** | Full training pipeline + `run_evaluate`. ~2.4k lines. Changes can break the entire flow. |
 | `meta_config.py` | **High** | Central contract. Changes affect all projects and the dataset/training. |
 | `inference.py` | **High** | Standalone inference + evaluation. Must stay aligned with training's preprocessing/index_mapping. |
 | `data/dataset.py` | **Medium** | Dataset classes used by every project. Changes to `__getitem__` affect training. |

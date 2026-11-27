@@ -95,7 +95,7 @@ For the `forward()` output shape each loss expects, see [Models](../concepts/mod
 
 | Parameter | Default | Description |
 |---|---|---|
-| `device` | auto | `cpu`, `cuda` or `mps`. Auto-detected in that order of preference: CUDA, MPS, CPU |
+| `device` | auto | `cpu`, `cuda` or `mps`. Auto-detected in that order of preference: CUDA, MPS, CPU. `cuda` uses the first visible GPU: pick another one with `CUDA_VISIBLE_DEVICES` (e.g. `CUDA_VISIBLE_DEVICES=1 mars-rec run supervised ...`) |
 | `generator_workers` | `0` | DataLoader `num_workers` |
 | `pin_memory` | `False` | DataLoader `pin_memory` |
 
