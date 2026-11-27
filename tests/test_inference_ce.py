@@ -154,9 +154,17 @@ class TestRunEvaluateCE:
         result = run_evaluate(str(ce_task_dir), data_path=str(eval_csv), ranking_k=[1, 3], output_path=str(out))
 
         assert result["n_samples"] == len(TRUTH)
-        assert result["ranking_metrics"] == {
-            f"{m}@{k}": 1.0 for k in (1, 3) for m in ("ndcg", "hit_rate", "mrr", "map")
-        }
+        rm = result["ranking_metrics"]
+        for k in (1, 3):
+            for m in ("ndcg", "hit_rate", "recall", "mrr", "map"):
+                assert rm[f"{m}@{k}"] == 1.0, f"{m}@{k}"
+            assert rm[f"precision@{k}"] == pytest.approx(1 / k)
+        # Each user gets a different item on top: 3 of the 4 items recommended at k=1.
+        assert rm["coverage@1"] == pytest.approx(3 / 4)
+        # No training history in this standalone path → no popularity metrics.
+        assert "novelty@1" not in rm
+        assert result["ranking_protocol"]["n_queries"] == len(TRUTH)
+        assert result["ranking_protocol"]["exclude_seen"] is False
         assert result["roc_auc_metrics"] == {"roc_auc_ovr": pytest.approx(1.0)}
         with open(out) as f:
             assert json.load(f)["ranking_metrics"] == result["ranking_metrics"]

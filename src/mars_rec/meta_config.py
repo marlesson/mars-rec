@@ -147,9 +147,10 @@ class ProjectConfig(object):
     :param hist_output_column_name: Same as ``hist_view_column_name``.
     :param timestamp_column_name: Same as ``hist_view_column_name``.
     :param available_items_column_name: Name of the per-row candidate
-        slate column, consumed by
-        :class:`InteractionsWithNegativeItemGenerationByAvailableItemsDataset`.
-        Set to ``None`` to disable slate-based sampling.
+        slate column (e.g. the items shown in an impression), consumed by
+        :class:`InteractionsWithNegativeItemGenerationByAvailableItemsDataset`
+        and used as the ranking-evaluation candidate pool instead of the
+        full catalog. ``None`` (default) means the project has no slate.
     :param n_users_column: Name of the (optional) user-cardinality
         column persisted alongside the train CSV.
     :param n_items_column: Same for the item cardinality.
@@ -190,7 +191,7 @@ class ProjectConfig(object):
         hist_view_column_name: str = "hist_view",
         hist_output_column_name: str = "hist_output",
         timestamp_column_name: str = "timestamp",
-        available_items_column_name: str = "available_items",
+        available_items_column_name: Optional[str] = None,
         n_users_column: str = "n_users",
         n_items_column: str = "n_items",
         default_balance_fields: List[str] = None,

@@ -16,8 +16,10 @@ layers were removed, keeping a lean **data preparation â†’ supervised training â
   hash of its parameters, so re-running a finished experiment is free.
 - :material-lightning-bolt: **PyTorch Lightning training loop.** Includes early stopping, checkpointing,
   CSV logging (TensorBoard via the `tensorboard` extra), gradient clipping and LR schedulers.
-- :material-chart-line: **Ranking metrics.** Computes NDCG, HitRate, MRR and MAP @{5, 10, 20} plus
-  ROC-AUC on the test split.
+- :material-chart-line: **Ranking evaluation.** Ranks the full catalog for every test query and reports
+  NDCG, HitRate, Precision, Recall, MRR and MAP, plus coverage, Gini, popularity and novelty, all
+  @{5, 10, 20}. Each run is compared with a most-popular baseline and ROC-AUC is included
+  ([protocol](concepts/evaluation.md)).
 - :material-console: **One CLI.** `mars-rec` handles training, comparing runs, batch inference,
   re-evaluation and architecture diagrams.
 - :material-cloud-upload: **Docker & Vertex AI.** The same image runs locally and as a Vertex AI

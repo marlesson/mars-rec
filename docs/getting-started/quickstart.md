@@ -74,7 +74,7 @@ mars-rec results --project movielens100k_slate --sort-by val_loss
 # Top-10 items per user → result.json
 mars-rec predict --task-id <TASK_ID> --data data/test.parquet --top-k 10
 
-# Ranking metrics (NDCG / HitRate / MRR / MAP) on the original test split
+# Ranking evaluation (full catalog, popularity baseline) on the original test split
 mars-rec evaluate --task-id <TASK_ID> --ranking-metrics --split test
 
 # Architecture diagram (also generated automatically after training)

@@ -41,7 +41,7 @@ The training task receives the instance by its import path: `--project examples.
 | `other_input_columns` | Extra features passed to `forward()` after user and item, **in declaration order** |
 | `output_column` | The label (usually `NUMBER`, 0/1 implicit feedback) |
 | `metadata_columns` | Per-item features stored once in a metadata CSV and looked up by item index (e.g. text embeddings) |
-| `available_items_column_name` | Per-row candidate slate column; set to `None` to disable slate sampling |
+| `available_items_column_name` | Per-row candidate slate column (default `None`: no slate). When set, slate-based negative sampling reads it and the [ranking evaluation](evaluation.md) ranks the slate instead of the full catalog |
 | `recommender_type` | Informational tag ([`RecommenderType`][mars_rec.meta_config.RecommenderType]) |
 | `candidate_provider_factory` | Optional dynamic candidate pool for eval / inference (see [`mars_rec.filtering`](../reference/api/filtering.md)) |
 

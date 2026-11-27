@@ -45,6 +45,7 @@ from mars_rec.data.dataset import (
     InteractionsDataset,
     preprocess_interactions_data_frame,
 )
+from mars_rec.evaluation import RankingResult, build_ranking_queries, evaluate_rankings
 from mars_rec.filtering import CandidateProvider
 from mars_rec.meta_config import ProjectConfig, IOType
 from mars_rec.torch.data import NoAutoCollationDataLoader, FasterBatchSampler
@@ -502,53 +503,6 @@ def _collect_logits_and_targets(
 # ---------------------------------------------------------------------------
 
 
-def compute_ranking_metrics(
-    ground_truth_items: List[str],
-    sorted_actions_list: List[List[Any]],
-    ks: List[int] = [5, 10, 20],
-) -> Dict[str, float]:
-    """Compute ranking metrics (NDCG, HitRate, MRR, MAP).
-
-    Args:
-        ground_truth_items: The true item id per observation (as strings).
-        sorted_actions_list: Ranked predicted items per observation
-            (descending score, original IDs).
-        ks: List of cutoffs.
-
-    Returns:
-        Dict like ``{"ndcg@5": 0.xx, "hit_rate@5": ..., ...}``.
-    """
-    results: Dict[str, float] = {}
-
-    for k in sorted(ks):
-        ndcg_scores: List[float] = []
-        hit_scores: List[float] = []
-        rr_scores: List[float] = []
-        ap_scores: List[float] = []
-
-        for gt_item, ranked_items in zip(ground_truth_items, sorted_actions_list):
-            ranked_k = [str(x) for x in ranked_items[:k]]
-
-            if gt_item in ranked_k:
-                rank_pos = ranked_k.index(gt_item) + 1
-                ndcg_scores.append(1.0 / np.log2(rank_pos + 1))
-                hit_scores.append(1.0)
-                rr_scores.append(1.0 / rank_pos)
-                ap_scores.append(1.0 / rank_pos)
-            else:
-                ndcg_scores.append(0.0)
-                hit_scores.append(0.0)
-                rr_scores.append(0.0)
-                ap_scores.append(0.0)
-
-        results[f"ndcg@{k}"] = float(np.mean(ndcg_scores))
-        results[f"hit_rate@{k}"] = float(np.mean(hit_scores))
-        results[f"mrr@{k}"] = float(np.mean(rr_scores))
-        results[f"map@{k}"] = float(np.mean(ap_scores))
-
-    return results
-
-
 def compute_roc_auc(
     all_logits: torch.Tensor,
     all_targets: torch.Tensor,
@@ -650,7 +604,11 @@ def run_evaluate(
     1. Loads the trained model and artefacts.
     2. Obtains or preprocesses the evaluation DataFrame + Dataset.
     3. Runs batch forward to collect full logits and top-k ranked items.
-    4. Computes ranking metrics (NDCG, HitRate, MRR, MAP) for each *k*.
+    4. Ranks the full catalog per query and computes the
+       :mod:`mars_rec.evaluation` metrics for each *k*. There is no training
+       history here, so seen items are not excluded and the popularity
+       metrics / baseline are not computed — use
+       :func:`mars_rec.simulation.training.run_evaluate` for the full protocol.
     5. Computes ROC-AUC (binary or multi-class OvR).
     6. Writes a JSON report.
 
@@ -697,14 +655,8 @@ def run_evaluate(
     n_samples = len(dataset)
     logger.info("Dataset size: %d", n_samples)
 
-    # --- 3. Collect logits + top-k ---
-    max_k = max(ranking_k)
-    logger.info(
-        "Running inference (batch_size=%d, k=%d, device=%s)",
-        batch_size,
-        max_k,
-        device,
-    )
+    # --- 3. Collect logits ---
+    logger.info("Running inference (batch_size=%d, device=%s)", batch_size, device)
 
     all_logits, all_targets = _collect_logits_and_targets(
         model,
@@ -712,37 +664,9 @@ def run_evaluate(
         batch_size=batch_size,
         device=device,
     )
-    output_col = project_config.output_column.name
-    rev_map = build_reverse_item_mapping(index_mapping, output_col)
-    n_classes = all_logits.size(1) if all_logits.dim() == 2 else 1
-    top_k_indices, top_k_scores = _topk_from_logits(
-        all_logits, max_k, exclude_indices=reserved_logit_indices(rev_map, n_classes)
-    )
-
-    # --- 4. Ranking metrics ---
-    logger.info("Computing ranking metrics ...")
-
-    # Build sorted_actions (original IDs) per observation
-    sorted_actions_list: List[List[Any]] = []
-    for row_indices in top_k_indices:
-        items = []
-        for idx in row_indices:
-            raw_id = rev_map.get(int(idx), None)
-            if raw_id is not None:
-                items.append(raw_id)
-        sorted_actions_list.append(items)
-
-    # Ground truth: the target lives in ``output_col`` (the vocabulary the
-    # logits are over) and ``df_processed`` is already indexed, so map each
-    # index back to its original id — the same space as ``sorted_actions_list``.
-    # Unknown / reserved targets become "None" and never match.
-    gt_items = [str(rev_map.get(_safe_int(v))) for v in df_processed[output_col]]
-
-    ranking_metrics = compute_ranking_metrics(
-        gt_items,
-        sorted_actions_list,
-        ks=ranking_k,
-    )
+    ranking = _rank_from_logits(all_logits, df_processed, project_config, index_mapping, ranking_k)
+    ranking_metrics = ranking.metrics if ranking is not None else {}
+    ranking_protocol = ranking.protocol if ranking is not None else {}
 
     if ranking_metrics:
         banner("Ranking metrics", logger=logger)
@@ -768,6 +692,7 @@ def run_evaluate(
         "n_samples": n_samples,
         "ranking_k": ranking_k,
         "ranking_metrics": ranking_metrics,
+        "ranking_protocol": ranking_protocol,
         "roc_auc_metrics": roc_auc_metrics,
         "time": round(elapsed, 4),
     }
@@ -854,27 +779,43 @@ def _n_output_classes(index_mapping: Dict[str, Dict[Any, int]], output_col: str)
     return int(max(values)) + 1 if values else 0
 
 
-def _safe_int(value: Any) -> Optional[int]:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
+def _rank_from_logits(
+    all_logits: torch.Tensor,
+    df_processed: pd.DataFrame,
+    project_config: ProjectConfig,
+    index_mapping: Dict[str, Dict[Any, int]],
+    ks: Sequence[int],
+) -> Optional[RankingResult]:
+    """Rank the catalog from ``[N, n_items]`` logits with the shared evaluation protocol.
+
+    Returns ``None`` for point-wise models (one score per row): ranking them
+    needs candidate expansion, which :func:`mars_rec.simulation.training.run_evaluate` does.
+    """
+    if all_logits.dim() != 2 or all_logits.size(1) <= 1:
+        logger.warning("Ranking metrics need [N, n_items] logits; use `mars-rec evaluate` for point-wise models.")
         return None
-
-
-def _topk_from_logits(
-    logits: torch.Tensor,
-    k: int,
-    exclude_indices: Optional[Sequence[int]] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Extract top-k indices and scores from logits tensor."""
-    if logits.dim() == 2 and logits.size(1) > 1:
-        logits = _mask_indices(logits, exclude_indices)
-        actual_k = min(k, logits.size(1))
-        scores, indices = logits.topk(actual_k, dim=1)
-    else:
-        scores = logits.unsqueeze(1) if logits.dim() == 1 else logits
-        indices = torch.zeros_like(scores, dtype=torch.long)
-    return indices.numpy(), scores.numpy()
+    item_col = project_config.item_column.name
+    output_col = project_config.output_column.name
+    relevant_col = item_col if project_config.item_is_input else output_col
+    queries = build_ranking_queries(
+        df_processed,
+        user_column=project_config.user_column.name,
+        item_column=relevant_col,
+        output_column=output_col,
+        context_columns=[c.name for c in project_config.other_input_columns if c.name != item_col],
+    )
+    rev_map = build_reverse_item_mapping(index_mapping, relevant_col)
+    catalog = np.asarray(sorted(i for i in rev_map if i < all_logits.size(1)), dtype=np.int64)
+    catalog_t = torch.as_tensor(catalog)
+    scores = [all_logits[int(p), catalog_t] for p in queries.positions]
+    return evaluate_rankings(
+        queries,
+        scores,
+        [catalog] * len(queries),
+        ks=ks,
+        history=None,
+        n_catalog_items=len(catalog),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1097,7 +1038,8 @@ def score_candidates_bce(
     DataFrame with project-specific columns rewritten in place.
 
     Args:
-        model: trained nn.Module returning a single logit per row.
+        model: trained nn.Module returning a single logit per row. Its
+            ``recommendation_score`` is used when defined, ``forward`` otherwise.
         df_processed: framework-preprocessed observations, one row per turn.
         project_config: project config (needed for the item column name).
         index_mapping: framework index map (passed to InteractionsDataset).
@@ -1133,6 +1075,9 @@ def score_candidates_bce(
     if candidate_feature_overrides is None:
         default_lookup = resolve_candidate_lookup(extra.get(CANDIDATE_LOOKUP_PARAM), index_mapping)
         default_fn = validate_candidate_feature_fn(extra.get(CANDIDATE_FN_PARAM))
+
+    # Multi-task models expose the ranking score separately from ``forward``.
+    score_fn = getattr(model, "recommendation_score", None) or model
 
     out_scores: List[torch.Tensor] = []
     out_eligible: List[np.ndarray] = []
@@ -1204,7 +1149,7 @@ def score_candidates_bce(
             for x, _ in loader:
                 inputs = x if isinstance(x, (list, tuple)) else [x]
                 inputs = [t.to(torch_device) if isinstance(t, torch.Tensor) else t for t in inputs]
-                s = model(*inputs)
+                s = score_fn(*inputs)
                 if s.dim() > 1:
                     s = s.squeeze(-1)
                 chunk_scores.append(s.cpu())

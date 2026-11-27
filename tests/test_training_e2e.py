@@ -32,7 +32,11 @@ import pytest
 
 pytestmark = pytest.mark.slow
 
-RANKING_KEYS = {f"{m}@{k}" for m in ("ndcg", "hit_rate", "mrr", "map") for k in (5, 10, 20)}
+
+def _ranking_keys():
+    from mars_rec.evaluation import ranking_metric_names
+
+    return set(ranking_metric_names((5, 10, 20)))
 
 
 def _build_task(**overrides):
@@ -198,35 +202,60 @@ class TestTrainingArtifacts:
         assert "n_items" in meta["data"]
 
     def test_metadata_records_ranking_and_roc_auc(self, trained_run):
-        """With ``ranking_metrics=True`` the post-train hook computes
-        NDCG/HitRate/MRR/MAP @{5,10,20} and ROC-AUC and persists them."""
+        """With ``ranking_metrics=True`` the post-train hook computes the
+        accuracy + beyond-accuracy metrics @{5,10,20}, a popularity baseline,
+        the protocol and ROC-AUC, and persists them."""
         ranking = trained_run.metadata["ranking_metrics"]
-        assert set(ranking) == RANKING_KEYS
+        assert set(ranking) == _ranking_keys()
         for name, value in ranking.items():
-            assert 0.0 <= value <= 1.0, name
+            if not name.startswith(("avg_popularity", "novelty")):
+                assert 0.0 <= value <= 1.0, name
         # Monotonic in k: a larger cutoff can only find more hits.
         assert ranking["hit_rate@5"] <= ranking["hit_rate@10"] <= ranking["hit_rate@20"]
+        assert ranking["recall@5"] <= ranking["recall@10"] <= ranking["recall@20"]
         assert ranking["ndcg@5"] <= ranking["ndcg@10"] <= ranking["ndcg@20"]
-        # One relevant item per row → MRR and MAP coincide.
-        for k in (5, 10, 20):
-            assert ranking[f"mrr@{k}"] == pytest.approx(ranking[f"map@{k}"])
-        # The fixture catalog has 12 items (< 20 candidates), so the ground
-        # truth is always inside the top-20.
+        # The fixture catalog has 12 items (< 20 candidates), so every
+        # relevant item is inside the top-20.
         assert ranking["hit_rate@20"] == 1.0
+        assert ranking["recall@20"] == 1.0
+
+        assert set(trained_run.metadata["ranking_baseline"]) == _ranking_keys()
+
+        protocol = trained_run.metadata["ranking_protocol"]
+        assert protocol["candidates"] == "full_catalog"
+        assert protocol["exclude_seen"] is True
+        assert protocol["n_catalog_items"] == 12
+        test_df = pd.read_csv(trained_run.test_csv)
+        # No context columns: one query per user with a positive test row.
+        assert protocol["n_queries"] == test_df.loc[test_df["label"] > 0, "user_id"].nunique()
+        assert protocol["n_positive_rows"] == int((test_df["label"] > 0).sum())
 
         roc = trained_run.metadata["roc_auc_metrics"]
         assert set(roc) == {"roc_auc"}
         assert 0.0 <= roc["roc_auc"] <= 1.0
 
-    def test_test_set_predictions_are_ranked_per_row(self, trained_run):
+    def test_test_set_predictions_are_ranked_per_query(self, trained_run):
+        import ast
+
         test_df = pd.read_csv(trained_run.test_csv)
+        positives = test_df[test_df["label"] > 0]
         preds = pd.read_csv(trained_run.task_dir / "eval" / "test" / "predictions.csv")
-        assert len(preds) == len(test_df)
-        for column in ("sorted_actions", "action_scores", "trained", "item_indexed"):
+        assert len(preds) == trained_run.metadata["ranking_protocol"]["n_queries"]
+        for column in ("user_id", "relevant_items", "sorted_actions", "action_scores", "n_candidates"):
             assert column in preds.columns
-        for raw in preds["action_scores"]:
-            scores = json.loads(raw)
+
+        # Items the user saw in train / val are never recommended.
+        ds = trained_run.test_csv.parent
+        seen = pd.concat([pd.read_csv(p) for p in (*ds.glob("train_*.csv"), *ds.glob("val_*.csv"))])
+        seen_by_user = seen.groupby("user_id")["item_id"].apply(set)
+        for _, row in preds.iterrows():
+            scores = json.loads(row["action_scores"])
             assert scores == sorted(scores, reverse=True)
+            ranked = ast.literal_eval(row["sorted_actions"])
+            relevant = ast.literal_eval(row["relevant_items"])
+            assert set(relevant) == set(positives.loc[positives["user_id"] == row["user_id"], "item_id"])
+            assert not set(ranked) & seen_by_user.get(row["user_id"], set())
+            assert len(ranked) == min(20, row["n_candidates"])
 
     def test_index_mapping_persisted_with_pad_oov_reservations(self, trained_run):
         """The saved index_mapping must honour OOV=0 / NaN=1 / -1=2
@@ -258,8 +287,8 @@ class TestRunEvaluateOriginalSplits:
     """Flow 1 — re-evaluate the splits the model was trained on."""
 
     def test_reproduces_training_time_metrics(self, trained_run):
-        """Candidate sampling is seeded per (seed, user, item), so a re-eval
-        must give byte-identical ranking metrics — this is what makes
+        """Full-catalog ranking with a seeded tie-break is deterministic, so a
+        re-eval must give byte-identical ranking metrics — this is what makes
         ``mars-rec results`` comparable across re-evaluations."""
         from mars_rec.simulation.training import run_evaluate
 
@@ -298,7 +327,12 @@ class TestRunEvaluateOriginalSplits:
         results = run_evaluate(
             str(trained_run.task_dir), eval_split="test", ranking_metrics=False, output_dir=str(tmp_path)
         )
-        assert results == {"ranking_metrics": {}, "roc_auc_metrics": {}}
+        assert results == {
+            "ranking_metrics": {},
+            "ranking_baseline": {},
+            "ranking_protocol": {},
+            "roc_auc_metrics": {},
+        }
 
     def test_missing_task_dir_raises(self, tmp_path):
         from mars_rec.simulation.training import run_evaluate

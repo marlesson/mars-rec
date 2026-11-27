@@ -43,6 +43,7 @@ src/mars_rec/          # Framework source code (the only installable package)
   cli.py                    # CLI (Click): "run supervised", "run data", "list", "results", "predict", "evaluate", "visualize"
   filtering.py              # CandidateProvider / CandidateFilter — inference-time candidate pools
   inference.py              # Standalone inference + evaluation (run_inference, run_evaluate)
+  evaluation.py             # Offline ranking evaluation: queries, full-catalog ranking, metrics, popularity baseline
   visualization.py          # Architecture visualization — single module, SVG-only.
                             # Exposes generate_architecture_diagram(), trace_model_shapes(),
                             # extract_model_ir(), render_svg_flow(), load_model_from_task(),
@@ -119,7 +120,8 @@ The pipeline follows this sequence orchestrated by Luigi:
    ├── Trains with PyTorch Lightning (callbacks: EarlyStopping, Checkpoint, CSVLogger, TensorBoard if the `tensorboard` extra is installed)
    ├── Evaluates on the validation set
    ├── Generates predictions on the test set
-   ├── Optional: ranking metrics (NDCG/HitRate/MRR/MAP @{5,10,20}) + ROC-AUC → metadata.json
+   ├── Optional (ranking_metrics=True): full-catalog ranking evaluation (evaluation.py) → ranking_metrics,
+   │   ranking_baseline, ranking_protocol + ROC-AUC in metadata.json
    └── Saves artifacts: params.json + metadata.json at the root, model/ (weights.ckpt, index_mapping.pkl, …),
        training/ (history.csv, plots, samples) and eval/test/ (metrics.json, predictions.csv, plots/)
 ```
@@ -264,6 +266,10 @@ All `list/results` lookups read `output/models/SupervisedModelTraining/results/<
 1. Add the function to `src/mars_rec/torch/metrics.py`
 2. Register it in `METRIC_REGISTRY` (same file) — the registry key is the name used in the `metrics` list
 
+These are per-batch training / validation metrics. Offline top-k ranking metrics (computed after
+training) live in `src/mars_rec/evaluation.py::compute_ranking_metrics`; add them there, with a
+hand-computed test in `tests/test_evaluation.py`, and list them in `ranking_metric_names`.
+
 ### Adding a new optimizer
 
 1. Add it to `src/mars_rec/torch/optimizer.py`
@@ -279,6 +285,7 @@ All `list/results` lookups read `output/models/SupervisedModelTraining/results/<
 
 - `inference.py::run_inference` is the source of truth for batch top-k prediction. It loads `params.json` + `weights.ckpt` + `index_mapping.pkl`, preprocesses the input the same way training does, and writes `{top10s, user, time}` to JSON.
 - `simulation/training.py::run_evaluate` re-builds a `SupervisedModelTraining` instance from `params.json`, points it to the existing task dir (`task._source_task_dir`), and runs the same `evaluate()` method as the original training. Two flows: original splits (`data_path=None`) or external dataset.
+- `evaluation.py` is the single implementation of the offline ranking protocol and metrics (see `docs/concepts/evaluation.md`). Training, `simulation.training.run_evaluate` and `inference.run_evaluate` all call it; never re-implement NDCG / recall / etc. elsewhere.
 - `run_evaluate` writes `eval/<name>/{metrics.json,predictions.csv,plots/}` and refreshes `metadata.json` (what `list` / `results` read for ranking + ROC-AUC metrics) only for the canonical `eval/test` evaluation, so external-data evaluations never overwrite the training-time numbers.
 
 ## Documentation

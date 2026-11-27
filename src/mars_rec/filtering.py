@@ -6,7 +6,7 @@ scoring**. It generalizes the legacy ``ProjectConfig.available_items_column_name
 mechanism (which is a static per-row column populated offline) into a
 plug-in providers usable in three places:
 
-  - training-time eval     (``_BaseModelTraining._get_candidate_items``)
+  - training-time eval     (``SupervisedModelTraining._save_test_set_predictions``, with ``--prefilter``)
   - CE inference           (``inference.predict_top_k`` — masks logits)
   - BCE inference          (``inference.score_candidates_bce`` — restricts catalog)
 

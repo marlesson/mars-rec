@@ -87,13 +87,13 @@ Each evaluation writes `metrics.json`, `predictions.csv` and `plots/` to its own
 | External dataset | file name of `--data` without extension (`new_test`) | No |
 
 Pass `--name <name>` to choose the directory yourself (`test` is reserved for the original splits),
-or `--output <dir>` to write the same files somewhere else. Metrics include ranking metrics
-(NDCG, HitRate, MRR, MAP @{5, 10, 20}) and ROC-AUC; ROC-AUC is omitted when the evaluated split has
-a single class, since it is undefined there.
+or `--output <dir>` to write the same files somewhere else. Metrics include the
+[ranking evaluation](../concepts/evaluation.md) (full-catalog ranking, accuracy and beyond-accuracy
+metrics @{5, 10, 20}, most-popular baseline) and ROC-AUC. ROC-AUC is omitted when the evaluated
+split has a single class, since it is undefined there.
 
-`--prefilter` applies the project's
-[`CandidateProvider`][mars_rec.filtering.CandidateProvider] when it builds the candidate pool for
-ranking metrics.
+`--prefilter` ranks the pool of the project's
+[`CandidateProvider`][mars_rec.filtering.CandidateProvider] instead of the full catalog.
 
 ## Architecture diagram: `mars-rec visualize`
 
