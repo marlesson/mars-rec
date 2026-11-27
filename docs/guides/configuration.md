@@ -24,6 +24,7 @@ The `Makefile` loads `.env` automatically. You can also override a value per inv
 | `LUIGI_CONFIG_PATH` | the package's `luigi.cfg` | Set automatically by the CLI |
 | `PYTHONPATH` | — | Must include the directory that contains your project package |
 | `PYTHONHASHSEED` | set to `seed` at runtime | Reproducibility |
+| `MARS_REC_PARALLEL_MIN_ROWS` | `2000000` | Row count from which parsing and remapping array columns uses a `multiprocessing.Pool`. Smaller frames are processed in-process, which is faster than starting workers. `0` always uses the pool, a negative value never does |
 | `CUDA_VISIBLE_DEVICES` | all GPUs | Which GPU `--device cuda` trains on (it always uses the first visible one) |
 
 ## Read by the build tooling

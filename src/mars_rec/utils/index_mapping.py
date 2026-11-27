@@ -16,6 +16,7 @@ constructs ``nn.Embedding`` with ``num_embeddings = n_items + 3``
 does internally).
 """
 
+import contextlib
 import functools
 import math
 from collections import defaultdict
@@ -25,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from mars_rec.meta_config import ProjectConfig, IOType
+from mars_rec.utils.utils import use_parallel
 from multiprocessing import Pool
 import os
 
@@ -100,6 +102,22 @@ def map_array(values: list, mapping: dict) -> List[int]:
     return [int(mapping[str(value)]) for value in values]
 
 
+def _map_arrays(arrays: Iterable[list], mapping: Mapping[Any, int]) -> List[List[int]]:
+    """In-process :func:`map_array` over every row, without growing ``mapping``.
+
+    :func:`map_array` indexes ``mapping`` directly, so a ``defaultdict``
+    records every unseen value as a new key. The pool workers did that on
+    their own copy of the mapping; doing it here would add the unseen
+    values of val / test to the shared mapping, so look them up with
+    ``get`` and the same default instead.
+    """
+    if isinstance(mapping, defaultdict) and mapping.default_factory is not None:
+        default = mapping.default_factory()
+        get = mapping.get
+        return [[int(get(str(value), default)) for value in values] for values in arrays]
+    return [map_array(values, mapping) for values in arrays]
+
+
 def transform_with_indexing(
     df: pd.DataFrame,
     index_mapping: Dict[str, dict],
@@ -108,10 +126,11 @@ def transform_with_indexing(
     """Rewrite every ``INDEXABLE`` / ``INDEXABLE_ARRAY`` column to its int ids.
 
     Mutates ``df`` in place. Mapped ``INDEXABLE`` columns become
-    ``int`` dtype; ``INDEXABLE_ARRAY`` columns are remapped in
-    parallel via ``multiprocessing.Pool`` (chunksize tuned by CPU
-    count). Columns not present in ``project_config.all_columns`` are
-    left untouched.
+    ``int`` dtype. ``INDEXABLE_ARRAY`` columns are remapped in-process,
+    or through a ``multiprocessing.Pool`` when the frame is large enough
+    to pay for it (see :func:`mars_rec.utils.utils.use_parallel`).
+    Columns not present in ``project_config.all_columns`` are left
+    untouched.
     """
     if df is None:
         return None
@@ -126,25 +145,9 @@ def transform_with_indexing(
             if column.type == IOType.INDEXABLE_ARRAY:
                 array_columns.append(key)
 
-    if array_columns:
-        chunksize = max(1, len(df) // (os.cpu_count() * 4))
-        with Pool(os.cpu_count()) as pool:
-            for key, mapping in index_mapping.items():
-                column = column_lookup.get(key)
-                if column is None:
-                    continue
-                if column.type == IOType.INDEXABLE:
-                    col = df[key]
-                    if col.dtype != object:
-                        col = col.astype(str)
-                    df[key] = col.map(mapping).astype(int)
-                elif column.type == IOType.INDEXABLE_ARRAY:
-                    df[key] = pool.map(
-                        functools.partial(map_array, mapping=mapping),
-                        df[key],
-                        chunksize=chunksize,
-                    )
-    else:
+    parallel = bool(array_columns) and use_parallel(len(df))
+    pool_context = Pool(os.cpu_count()) if parallel else contextlib.nullcontext()
+    with pool_context as pool:
         for key, mapping in index_mapping.items():
             column = column_lookup.get(key)
             if column is None:
@@ -154,3 +157,12 @@ def transform_with_indexing(
                 if col.dtype != object:
                     col = col.astype(str)
                 df[key] = col.map(mapping).astype(int)
+            elif column.type == IOType.INDEXABLE_ARRAY:
+                if pool is None:
+                    df[key] = _map_arrays(df[key], mapping)
+                else:
+                    df[key] = pool.map(
+                        functools.partial(map_array, mapping=mapping),
+                        df[key],
+                        chunksize=max(1, len(df) // (os.cpu_count() * 4)),
+                    )

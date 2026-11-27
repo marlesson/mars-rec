@@ -352,6 +352,7 @@ Read by the code:
 | `LUIGI_CONFIG_PATH` | auto (package's `luigi.cfg`) | Path to Luigi configuration; set by `cli.py` |
 | `PYTHONPATH` | — | Must include the project root so `examples.*` (or your own project package) resolves |
 | `PYTHONHASHSEED` | set at runtime to `seed` | Reproducibility (`training.py::seed_everything`) |
+| `MARS_REC_PARALLEL_MIN_ROWS` | `2000000` | Row count from which array-column parsing / remapping uses a `multiprocessing.Pool` (`utils/utils.py::use_parallel`). Below it the work runs in-process, which is faster than spawning workers. `0` always uses the pool, a negative value never does |
 
 Read by the build / deploy tooling (`Makefile`, auto-loaded from `.env`):
 

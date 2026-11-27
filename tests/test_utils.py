@@ -220,3 +220,56 @@ class TestParallelLiteralEval:
         series = pd.Series(["[[1, 2], [3, 4]]"])
         result = parallel_literal_eval(series, use_tqdm=False)
         assert result == [[[1, 2], [3, 4]]]
+
+
+class TestUseParallel:
+    def test_default_threshold(self, monkeypatch):
+        from mars_rec.utils.utils import DEFAULT_PARALLEL_MIN_ROWS, PARALLEL_MIN_ROWS_ENV, use_parallel
+
+        monkeypatch.delenv(PARALLEL_MIN_ROWS_ENV, raising=False)
+        assert not use_parallel(DEFAULT_PARALLEL_MIN_ROWS - 1)
+        assert use_parallel(DEFAULT_PARALLEL_MIN_ROWS)
+
+    def test_env_override(self, monkeypatch):
+        from mars_rec.utils.utils import PARALLEL_MIN_ROWS_ENV, use_parallel
+
+        monkeypatch.setenv(PARALLEL_MIN_ROWS_ENV, "10")
+        assert not use_parallel(9)
+        assert use_parallel(10)
+
+    def test_zero_forces_pool_and_negative_disables_it(self, monkeypatch):
+        from mars_rec.utils.utils import PARALLEL_MIN_ROWS_ENV, use_parallel
+
+        monkeypatch.setenv(PARALLEL_MIN_ROWS_ENV, "0")
+        assert use_parallel(1)
+        assert not use_parallel(0)
+        monkeypatch.setenv(PARALLEL_MIN_ROWS_ENV, "-1")
+        assert not use_parallel(10**9)
+
+    def test_invalid_env_falls_back_to_default(self, monkeypatch):
+        from mars_rec.utils.utils import DEFAULT_PARALLEL_MIN_ROWS, PARALLEL_MIN_ROWS_ENV, parallel_min_rows
+
+        monkeypatch.setenv(PARALLEL_MIN_ROWS_ENV, "lots")
+        assert parallel_min_rows() == DEFAULT_PARALLEL_MIN_ROWS
+
+
+class TestParallelLiteralEvalPoolGate:
+    def test_small_input_does_not_start_a_pool(self, monkeypatch):
+        import mars_rec.utils.utils as utils_module
+
+        def _no_pool(*args, **kwargs):
+            raise AssertionError("Pool must not be created below the threshold")
+
+        monkeypatch.delenv(utils_module.PARALLEL_MIN_ROWS_ENV, raising=False)
+        monkeypatch.setattr(utils_module, "Pool", _no_pool)
+        assert parallel_literal_eval(pd.Series(["[1, 2]", "['a']"]), use_tqdm=False) == [[1, 2], ["a"]]
+
+    def test_serial_and_pool_paths_agree(self, monkeypatch):
+        from mars_rec.utils.utils import PARALLEL_MIN_ROWS_ENV
+
+        series = pd.Series(["[1, 2]", "['a', 'b']", "[]", "[1.5]"])
+        monkeypatch.setenv(PARALLEL_MIN_ROWS_ENV, "-1")
+        serial = parallel_literal_eval(series, use_tqdm=False)
+        monkeypatch.setenv(PARALLEL_MIN_ROWS_ENV, "0")
+        parallel = parallel_literal_eval(series, use_tqdm=False)
+        assert serial == parallel == [[1, 2], ["a", "b"], [], [1.5]]
