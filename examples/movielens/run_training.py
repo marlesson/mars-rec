@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 import luigi
 from mars_rec.simulation.training import SupervisedModelTraining
+from examples.movielens.config import MOVIELENS_GENRE_DIM
 
 if __name__ == "__main__":
     task = SupervisedModelTraining(
@@ -25,6 +26,7 @@ if __name__ == "__main__":
             "hidden_size": 128,
             "n_layers": 3,
             "dropout": 0.2,
+            "genre_dim": MOVIELENS_GENRE_DIM,
         },
         epochs=10,
         batch_size=512,

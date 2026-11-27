@@ -8,6 +8,13 @@ Dataset: https://grouplens.org/datasets/movielens/1m/
 - ~1M ratings from 6040 users on 3706 movies
 - Ratings: 1-5 (converted to implicit: rating >= 4 -> positive)
 - Features: user gender, age group, occupation; movie genres
+
+User features are per-row ``NUMBER`` columns (they belong to the row's user,
+which negative sampling never changes). Movie genres are a per-item
+``FLOAT_ARRAY`` in a separate metadata CSV (``metadata_columns``): when the
+dataset swaps the item id to build a negative, it re-looks-up the genres of
+the *sampled* movie. Keeping genres as per-row columns instead would leak the
+label — every negative would carry the genres of the positive movie.
 """
 
 import os
@@ -25,12 +32,14 @@ DATASET_DIR: str = os.path.join(BASE_DIR, "dataset")
 
 MOVIELENS_1M_URL = "https://files.grouplens.org/datasets/movielens/ml-1m.zip"
 
+METADATA_PATH: str = os.path.join(DATASET_DIR, "movielens_1m_item_metadata.csv")
+
 # Age encoding from MovieLens README
 AGE_MAP = {1: 0, 18: 1, 25: 2, 35: 3, 45: 4, 50: 5, 56: 6}
 GENDER_MAP = {"F": 0, "M": 1}
 
-# Top genres for multi-hot encoding
-TOP_GENRES = [
+# The 18 MovieLens 1M genres, multi-hot encoded per movie
+GENRES = [
     "Action",
     "Adventure",
     "Animation",
@@ -50,18 +59,17 @@ TOP_GENRES = [
     "War",
     "Western",
 ]
-
-
-def genre_col_name(genre: str) -> str:
-    """Convert genre name to a valid column name."""
-    return "genre_" + genre.lower().replace("'", "").replace("-", "")
+GENRE_DIM: int = len(GENRES)
 
 
 class DownloadAndPrepareMovieLens(luigi.Task):
-    """Download MovieLens 1M zip file and preprocess into a single CSV."""
+    """Download MovieLens 1M and write the interactions + item-metadata CSVs."""
 
     def output(self):
-        return luigi.LocalTarget(os.path.join(DATASET_DIR, "movielens_1m.csv"))
+        return (
+            luigi.LocalTarget(os.path.join(DATASET_DIR, "movielens_1m.csv")),
+            luigi.LocalTarget(METADATA_PATH),
+        )
 
     def run(self):
         from mars_rec.utils.download import download_file
@@ -117,16 +125,16 @@ class DownloadAndPrepareMovieLens(luigi.Task):
         # Normalize occupation (0-20 -> 0-1)
         users["occupation_norm"] = (users["occupation"] / 20.0).astype(float)
 
-        # --- Movie features: multi-hot genre encoding ---
-        for genre in TOP_GENRES:
-            movies[genre_col_name(genre)] = movies["genres"].str.contains(genre, regex=False).astype(float)
+        # --- Movie features: multi-hot genre vector in a per-item metadata CSV ---
+        genre_sets = movies["genres"].str.split("|").apply(set)
+        movies["movie_genre_vec"] = [
+            "[" + ", ".join("1.0" if g in genres else "0.0" for g in GENRES) + "]" for genres in genre_sets
+        ]
+        movies[["movie_id", "movie_genre_vec"]].to_csv(METADATA_PATH, index=False)
 
-        # --- Merge ---
+        # --- Merge user features (per-row) ---
         df = ratings.merge(
             users[["user_id", "gender_encoded", "age_encoded", "occupation_norm"]], on="user_id", how="left"
-        )
-        df = df.merge(
-            movies[["movie_id"] + [c for c in movies.columns if c.startswith("genre_")]], on="movie_id", how="left"
         )
 
         # --- Implicit feedback: rating >= 4 is positive ---
@@ -135,16 +143,10 @@ class DownloadAndPrepareMovieLens(luigi.Task):
         # Sort by timestamp for temporal split
         df = df.sort_values("timestamp").reset_index(drop=True)
 
-        # Select final columns
-        genre_cols = [c for c in df.columns if c.startswith("genre_")]
-        result = df[
-            ["user_id", "movie_id", "gender_encoded", "age_encoded", "occupation_norm", "timestamp"]
-            + genre_cols
-            + ["label"]
-        ]
+        result = df[["user_id", "movie_id", "gender_encoded", "age_encoded", "occupation_norm", "timestamp", "label"]]
 
-        result.to_csv(self.output().path, index=False)
-        print(f"MovieLens 1M dataset prepared: {len(result)} ratings")
+        result.to_csv(self.output()[0].path, index=False)
+        print(f"MovieLens 1M dataset prepared: {len(result)} ratings, {len(movies)} item-metadata rows")
         print(f"  Users: {result['user_id'].nunique()}")
         print(f"  Movies: {result['movie_id'].nunique()}")
         print(f"  Positive rate (rating>=4): {result['label'].mean():.2%}")
@@ -164,21 +166,15 @@ class PrepareMovieLensDataFrame(BasePrepareDataFrames):
 
     @property
     def read_data_frame_path(self) -> str:
-        return self.input().path
+        return self.input()[0].path
 
     @property
     def metadata_data_frame_path(self) -> Optional[str]:
-        return None
+        return METADATA_PATH
 
     @property
     def timestamp_property(self) -> Optional[str]:
         return "timestamp"
-
-    def create_available_items(self, df: pd.DataFrame) -> pd.DataFrame:
-        # Skip available_items generation — not needed for
-        # InteractionsWithNegativeItemGenerationDataset which samples
-        # negatives randomly from all items.
-        return df
 
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
         float_cols = [c for c in df.columns if c not in ("user_id", "movie_id", "timestamp")]

@@ -124,8 +124,5 @@ class PrepareOnlineRetailDataFrame(BasePrepareDataFrames):
     def timestamp_property(self) -> Optional[str]:
         return "timestamp"
 
-    def create_available_items(self, df: pd.DataFrame) -> pd.DataFrame:
-        return df
-
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
         return df

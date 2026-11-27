@@ -15,12 +15,12 @@ class MovieLensNCF(RecommenderModule):
     """Neural Collaborative Filtering model for MovieLens.
 
     Combines user/item embeddings (GMF path) with an MLP path that
-    also incorporates user demographic features and movie genre features.
+    also incorporates user demographic features and the movie genre vector.
 
     Architecture:
         GMF: user_emb * item_emb (element-wise product)
-        MLP: concat(user_emb, item_emb, user_features, genre_features) -> MLP
-        Output: concat(GMF, MLP) -> Linear -> sigmoid
+        MLP: concat(user_emb, item_emb, user_features, genre_vec) -> MLP
+        Output: concat(GMF, MLP) -> Linear (logit; train with ``bce_logits``)
     """
 
     def __init__(
@@ -31,6 +31,7 @@ class MovieLensNCF(RecommenderModule):
         hidden_size: int = 128,
         n_layers: int = 3,
         dropout: float = 0.2,
+        genre_dim: int = 18,
     ):
         super().__init__(project_config, index_mapping)
 
@@ -42,9 +43,9 @@ class MovieLensNCF(RecommenderModule):
         self.user_emb_mlp = nn.Embedding(self._n_users, n_factors)
         self.item_emb_mlp = nn.Embedding(self._n_items, n_factors)
 
-        # Number of extra features: 3 user features + 18 genre features
-        n_extra = len(project_config.other_input_columns)
-        mlp_input = 2 * n_factors + n_extra
+        # Extra MLP inputs: the per-row user features + the genre vector
+        self._n_user_features = len(project_config.other_input_columns)
+        mlp_input = 2 * n_factors + self._n_user_features + genre_dim
 
         # Build MLP layers
         layers = []
@@ -66,9 +67,13 @@ class MovieLensNCF(RecommenderModule):
 
     def forward(self, *args):
         # args order follows ProjectConfig.input_columns:
-        # user_ids, item_ids, gender, age, occupation, 18 genre features
+        #   0: user_id (B,)   1: movie_id (B,)
+        #   2..4: gender, age, occupation (B,) each  — other_input_columns
+        #   5: movie_genre_vec (B, genre_dim)        — metadata_columns
         user_ids = args[0]
         item_ids = args[1]
+        user_features = torch.stack(list(args[2 : 2 + self._n_user_features]), dim=1)
+        genre_vec = args[2 + self._n_user_features]
 
         # GMF path
         gmf = self.user_emb_gmf(user_ids) * self.item_emb_gmf(item_ids)
@@ -77,10 +82,7 @@ class MovieLensNCF(RecommenderModule):
         user_mlp = self.user_emb_mlp(user_ids)
         item_mlp = self.item_emb_mlp(item_ids)
 
-        # Stack all extra features (3 user + 18 genre = 21)
-        extra_features = torch.stack(list(args[2:]), dim=1)
-
-        mlp_input = torch.cat([user_mlp, item_mlp, extra_features], dim=1)
+        mlp_input = torch.cat([user_mlp, item_mlp, user_features, genre_vec], dim=1)
         mlp_out = self.mlp(mlp_input)
 
         # Combine GMF + MLP

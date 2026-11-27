@@ -216,3 +216,17 @@ class TestCreateAvailableItems:
         task.create_available_items(df)
         # Column kept as-is (no modification).
         assert df["avail"].tolist() == original_avail
+
+    @pytest.mark.parametrize("column_name", [None, ""])
+    def test_skipped_when_column_name_disabled(self, tmp_path, column_name):
+        # ProjectConfig(available_items_column_name=None) reaches the task as
+        # None; no slate must be built (and no column named None added).
+        task = _MiniPrep(
+            dataset_dir_param=str(tmp_path),
+            item_column="item_id",
+            available_items_column_name=column_name,
+            seed=0,
+        )
+        df = pd.DataFrame({"item_id": [1, 2, 3]})
+        task.create_available_items(df)
+        assert df.columns.tolist() == ["item_id"]
