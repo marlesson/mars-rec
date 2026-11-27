@@ -23,11 +23,12 @@ Usage (CLI)::
 import glob
 import json
 import logging
+import math
 import os
 import pickle
 import time
 from copy import deepcopy
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -204,6 +205,7 @@ def predict_top_k(
     candidate_provider: Optional[CandidateProvider] = None,
     full_catalog: Optional[np.ndarray] = None,
     rows: Optional[List[Dict[str, Any]]] = None,
+    exclude_indices: Optional[Sequence[int]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Run batch forward pass and extract top-k predictions.
 
@@ -213,6 +215,10 @@ def predict_top_k(
     indices are masked to ``-inf`` before the top-k extraction. Caller must
     also pass ``full_catalog`` (the int idx of every catalog item) and
     ``rows`` (per-observation context dicts, length == len(dataset)).
+
+    ``exclude_indices`` are logit indices that are never returned (masked
+    to ``-inf``) — pass :func:`reserved_logit_indices` so the reserved
+    OOV / NaN / PAD slots cannot take a top-k position.
 
     Returns:
         (top_k_indices, top_k_scores)  — both shape ``[N, k]``.
@@ -264,6 +270,7 @@ def predict_top_k(
                         device=logits.device,
                     )
                     logits = torch.where(mask, logits, neg_inf)
+                logits = _mask_indices(logits, exclude_indices)
                 actual_k = min(k, logits.size(1))
                 scores, indices = logits.topk(actual_k, dim=1)
             else:
@@ -287,15 +294,50 @@ def build_reverse_item_mapping(
     index_mapping: Dict[str, Dict[Any, int]],
     output_column: str,
 ) -> Dict[int, str]:
-    """Build ``{integer_index → original_item_id}`` for the output column."""
+    """Build ``{integer_index → original_item_id}`` for the output column.
+
+    Only real catalog values are kept: the OOV slot (``0``) and the
+    sentinel keys ``create_index_mapping`` reserves (``None`` / NaN → ``1``,
+    ``-1`` / ``"-1"`` → ``2``) are dropped, so the PAD token can never be
+    returned as a recommendation.
+    """
     fwd = index_mapping.get(output_column, {})
     rev = {}
     for raw_val, idx in fwd.items():
-        if raw_val is None or idx <= 1:
-            # 0 = unknown, 1 = padding — skip
+        if idx == 0 or _is_reserved_key(raw_val):
             continue
-        rev[idx] = raw_val
+        rev[int(idx)] = raw_val
     return rev
+
+
+def _is_reserved_key(raw_val: Any) -> bool:
+    """True for the sentinel keys of ``create_index_mapping`` (None, NaN, -1)."""
+    if raw_val is None:
+        return True
+    if isinstance(raw_val, float) and math.isnan(raw_val):
+        return True
+    return str(raw_val) == "-1"
+
+
+def reserved_logit_indices(rev_map: Dict[int, Any], n_classes: int) -> List[int]:
+    """Logit indices in ``[0, n_classes)`` that are not a real catalog item."""
+    return [i for i in range(n_classes) if i not in rev_map]
+
+
+def _mask_indices(logits: torch.Tensor, exclude_indices: Optional[Sequence[int]]) -> torch.Tensor:
+    """Set ``logits[:, exclude_indices]`` to ``-inf`` (no-op for 1-D / empty)."""
+    if not exclude_indices or logits.dim() != 2:
+        return logits
+    idx = torch.as_tensor(
+        [i for i in exclude_indices if 0 <= i < logits.size(1)],
+        dtype=torch.long,
+        device=logits.device,
+    )
+    if idx.numel() == 0:
+        return logits
+    logits = logits.clone()
+    logits[:, idx] = float("-inf")
+    return logits
 
 
 # ---------------------------------------------------------------------------
@@ -362,18 +404,19 @@ def run_inference(
         k,
         device,
     )
+    output_col = project_config.output_column.name
+    rev_map = build_reverse_item_mapping(index_mapping, output_col)
     top_k_indices, top_k_scores = predict_top_k(
         model,
         dataset,
         batch_size=batch_size,
         k=k,
         device=device,
+        exclude_indices=reserved_logit_indices(rev_map, _n_output_classes(index_mapping, output_col)),
     )
 
     # --- 5. Reverse map ---
     logger.info("Mapping indices to item IDs ...")
-    output_col = project_config.output_column.name
-    rev_map = build_reverse_item_mapping(index_mapping, output_col)
 
     top10s: List[List[Any]] = []
     for row_indices in top_k_indices:
@@ -555,6 +598,12 @@ def compute_roc_auc(
                 )
             )
         else:
+            # Same guard as SupervisedModelTraining._compute_roc_auc: sklearn
+            # returns NaN here, which json.dump writes as invalid ``NaN``.
+            if len(np.unique(y_true)) < 2:
+                logger.warning("ROC-AUC skipped: only one class present in y_true (undefined)")
+                return {}
+
             logit_losses = {
                 "bce_logits",
                 "bce_logits_smooth",
@@ -667,13 +716,15 @@ def run_evaluate(
         batch_size=batch_size,
         device=device,
     )
-    top_k_indices, top_k_scores = _topk_from_logits(all_logits, max_k)
+    output_col = project_config.output_column.name
+    rev_map = build_reverse_item_mapping(index_mapping, output_col)
+    n_classes = all_logits.size(1) if all_logits.dim() == 2 else 1
+    top_k_indices, top_k_scores = _topk_from_logits(
+        all_logits, max_k, exclude_indices=reserved_logit_indices(rev_map, n_classes)
+    )
 
     # --- 4. Ranking metrics ---
     logger.info("Computing ranking metrics ...")
-    output_col = project_config.output_column.name
-    item_col = project_config.item_column.name
-    rev_map = build_reverse_item_mapping(index_mapping, output_col)
 
     # Build sorted_actions (original IDs) per observation
     sorted_actions_list: List[List[Any]] = []
@@ -685,9 +736,11 @@ def run_evaluate(
                 items.append(raw_id)
         sorted_actions_list.append(items)
 
-    # Ground truth: use item_col from df_processed (already indexed → str of index)
-    # We need original IDs. The index_mapping maps original→index, so invert.
-    gt_items = df_processed[item_col].astype(str).tolist()
+    # Ground truth: the target lives in ``output_col`` (the vocabulary the
+    # logits are over) and ``df_processed`` is already indexed, so map each
+    # index back to its original id — the same space as ``sorted_actions_list``.
+    # Unknown / reserved targets become "None" and never match.
+    gt_items = [str(rev_map.get(_safe_int(v))) for v in df_processed[output_col]]
 
     ranking_metrics = compute_ranking_metrics(
         gt_items,
@@ -761,7 +814,9 @@ def _load_test_split(
     test_split_type = params.get("test_split_type", "random")
     seed = params.get("seed", 42)
 
-    prefix = f"test_{test_size}_test={test_split_type}_{seed}_"
+    # Must match ``BasePrepareDataFrames.output()``, which formats test_size
+    # with ``%.2f`` (0.2 -> "0.20").
+    prefix = f"test_{float(test_size):.2f}_test={test_split_type}_{int(seed)}_"
 
     # Scan the dataset directory for matching test CSV
     test_csv = None
@@ -797,12 +852,27 @@ def _load_test_split(
     return df, dataset
 
 
+def _n_output_classes(index_mapping: Dict[str, Dict[Any, int]], output_col: str) -> int:
+    """Logit width implied by the output column's index mapping."""
+    values = list(index_mapping.get(output_col, {}).values())
+    return int(max(values)) + 1 if values else 0
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _topk_from_logits(
     logits: torch.Tensor,
     k: int,
+    exclude_indices: Optional[Sequence[int]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Extract top-k indices and scores from logits tensor."""
     if logits.dim() == 2 and logits.size(1) > 1:
+        logits = _mask_indices(logits, exclude_indices)
         actual_k = min(k, logits.size(1))
         scores, indices = logits.topk(actual_k, dim=1)
     else:
