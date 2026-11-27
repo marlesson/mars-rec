@@ -34,6 +34,14 @@ import pandas as pd
 import random
 from torch.utils.data import Dataset
 
+from mars_rec.data.candidate_features import (
+    FN_PARAM,
+    LOOKUP_PARAM,
+    apply_candidate_features,
+    convert_dtype,
+    resolve_candidate_lookup,
+    validate_candidate_feature_fn,
+)
 from mars_rec.meta_config import ProjectConfig, IOType, Column
 from mars_rec.utils.index_mapping import map_array, real_indices
 from mars_rec.utils.utils import parallel_literal_eval
@@ -245,28 +253,12 @@ class InteractionsDataset(Dataset):
     :param index_mapping: ``{column_name: {raw: int_index}}`` used by
         a few negative-sampler variants to draw ids from the catalog.
 
-    The optional ``candidate_feature_lookup`` keyword argument (a dict, or
-    a 0-/1-arg callable returning a dict) overrides target-derived input
-    columns when a row is reused as a negative sample, keeping the
-    forward features consistent with the swapped item id.
+    The optional ``candidate_feature_lookup`` (a dict, or a 0-/1-arg
+    callable returning one) and ``candidate_feature_fn`` keyword arguments
+    rewrite item-dependent input columns when a row is reused as a negative
+    sample, keeping the features consistent with the swapped item id. See
+    :mod:`mars_rec.data.candidate_features`.
     """
-
-    # Columns whose values are derived from the candidate item id and which
-    # the per-candidate-feature override may replace at sample time. Listed
-    # here (vs hard-coded in the helper) so future projects can extend the
-    # set by subclassing without forking the override logic.
-    _CANDIDATE_DIRECT_LOOKUP_COLS: Tuple[str, ...] = (
-        "popularity",
-        "release_year_bucket",
-        "duration_bucket",
-        "album_id",
-        "tag_ids",
-        # v11 derived (Music CRS): mood cluster of the candidate track. The
-        # override is a no-op for configs whose lookup does not provide
-        # ``track_mood_cluster`` (i.e. every pre-v11 config), so this is
-        # backward compatible with the W12 incumbent.
-        "track_mood_cluster",
-    )
 
     def __init__(
         self,
@@ -277,17 +269,12 @@ class InteractionsDataset(Dataset):
         *args,
         **kwargs,
     ) -> None:
-        # Pop the per-candidate feature lookup *before* it can leak into a
-        # subclass kwargs forward (e.g. the popularity sampler accepts its
-        # own ``popularity_column`` here, but unrecognised kwargs raise).
-        # Accepted shapes:
-        #   - dict: pre-built lookup (used directly)
-        #   - 0-arg callable: () -> dict   (deferred load)
-        #   - 1-arg callable: (index_mapping) -> dict
-        # ``None`` (default) makes the override a no-op — backward-compat
-        # with every config that does not declare candidate-derived inputs.
-        self._candidate_feature_lookup_raw = kwargs.pop("candidate_feature_lookup", None)
+        # Pop the per-candidate feature params *before* they can leak into a
+        # subclass kwargs forward (unrecognised kwargs raise). ``None`` (the
+        # default) makes the override a no-op.
+        self._candidate_feature_lookup_raw = kwargs.pop(LOOKUP_PARAM, None)
         self._candidate_feature_lookup: Optional[Dict[str, Any]] = None
+        self._candidate_feature_fn = validate_candidate_feature_fn(kwargs.pop(FN_PARAM, None))
 
         self._project_config = project_config
         self._index_mapping = index_mapping
@@ -342,330 +329,54 @@ class InteractionsDataset(Dataset):
         ]
 
     # ---------------------------------------------------------------------
-    # Per-candidate target-feature override (used by negative samplers)
+    # Per-candidate feature override (used by negative samplers)
     # ---------------------------------------------------------------------
     def _resolve_candidate_lookup(self) -> Optional[Dict[str, Any]]:
         """Materialise ``candidate_feature_lookup`` on first use; cache it.
 
-        Accepts a pre-built dict, a 0-arg callable, or a 1-arg callable
-        ``(index_mapping) -> dict``. The deferred-callable form is what
-        configs put into ``dataset_extra_params`` so HuggingFace metadata
-        is only fetched once the trainer actually constructs a dataset.
+        See :func:`mars_rec.data.candidate_features.resolve_candidate_lookup`.
         """
-        if self._candidate_feature_lookup is not None:
-            return self._candidate_feature_lookup
-        raw = self._candidate_feature_lookup_raw
-        if raw is None:
-            return None
-        if isinstance(raw, dict):
-            self._candidate_feature_lookup = raw
-            return raw
-        if not callable(raw):
-            raise TypeError(f"candidate_feature_lookup must be a dict or callable, got {type(raw).__name__}")
-        try:
-            sig = inspect.signature(raw)
-            arity = len(
-                [
-                    p
-                    for p in sig.parameters.values()
-                    if p.kind
-                    in (
-                        inspect.Parameter.POSITIONAL_ONLY,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    )
-                    and p.default is inspect.Parameter.empty
-                ]
+        if self._candidate_feature_lookup is None:
+            self._candidate_feature_lookup = resolve_candidate_lookup(
+                self._candidate_feature_lookup_raw, self._index_mapping
             )
-        except (TypeError, ValueError):
-            arity = 0
-        materialised = raw(self._index_mapping) if arity >= 1 else raw()
-        if not isinstance(materialised, dict):
-            raise TypeError(f"candidate_feature_lookup callable must return a dict, got {type(materialised).__name__}")
-        self._candidate_feature_lookup = materialised
-        return materialised
+        return self._candidate_feature_lookup
 
     def _apply_candidate_features(
         self,
         input_tuple: Tuple[np.ndarray, ...],
         neg_item_indices: np.ndarray,
     ) -> Tuple[np.ndarray, ...]:
-        """Override target-derived columns in ``input_tuple`` using the
-        candidate's own metadata.
+        """Rewrite item-dependent columns of ``input_tuple`` for the negative items.
 
-        Replaces (per the configured lookup, when present) the ``popularity
-        / release_year_bucket / duration_bucket / album_id / tag_ids`` slots
-        with values keyed by the negative item index, and recomputes
-        ``artist_repeat_count`` / ``album_continuation`` against the row's
-        ``prev_artist_ids`` / ``prev_album_ids``.
-
-        No-op when ``candidate_feature_lookup`` is not configured —
-        preserving every existing config that does not declare any
-        target-derived inputs (the 12 simple model configs).
+        Applies the project's ``candidate_feature_lookup`` (direct lookups) and
+        ``candidate_feature_fn`` (computed features) through
+        :func:`mars_rec.data.candidate_features.apply_candidate_features`, the
+        same helper the evaluation and inference paths use. A no-op when
+        neither is configured.
         """
         lookup = self._resolve_candidate_lookup()
-        if not lookup:
+        if not lookup and self._candidate_feature_fn is None:
             return input_tuple
-
         col_idx = self._input_col_index_by_name
         input_list = list(input_tuple)
-        neg_arr = np.asarray(neg_item_indices, dtype=np.int64)
-
-        def _set(slot_name: str, raw_values: np.ndarray) -> None:
-            """Assign override using the column's declared IOType so the
-            resulting dtype matches what ``InteractionsDataset.__getitem__``
-            produced for the positive rows. Without this, mixing int64 and
-            float32 across positive/negative halves promotes to float64 in
-            ``np.concatenate`` — MPS rejects float64 tensors.
-            """
-            slot = col_idx[slot_name]
-            col_type = self._input_columns[slot].type
-            input_list[slot] = self._convert_dtype(raw_values, col_type)
-
-        # Direct lookups (numpy fancy index, vectorised over the negative batch)
-        for col in self._CANDIDATE_DIRECT_LOOKUP_COLS:
-            if col not in col_idx or col not in lookup:
-                continue
-            if col == "tag_ids":
-                tag_lut = lookup["tag_ids"]
-                _set(
-                    col,
-                    np.asarray(
-                        [tag_lut[i] for i in neg_arr],
-                        dtype=np.int64,
-                    ),
-                )
-            else:
-                _set(col, np.asarray(lookup[col][neg_arr]))
-
-        # Computed: artist_repeat_count = how many times the candidate's
-        # artist appears in the row's prev_artist_ids
-        if "artist_repeat_count" in col_idx and "prev_artist_ids" in col_idx and "_artist_per_idx" in lookup:
-            cand_artists = np.asarray(
-                lookup["_artist_per_idx"][neg_arr],
-                dtype=np.int64,
-            )  # [B]
-            prev_artists = np.asarray(
-                input_list[col_idx["prev_artist_ids"]],
-                dtype=np.int64,
-            )  # [B, L]
-            pad_artist = lookup.get("_pad_artist", 0)
-            valid = (cand_artists > 0) & (cand_artists != pad_artist)
-            arc = (cand_artists[:, None] == prev_artists).sum(axis=1)
-            _set("artist_repeat_count", np.where(valid, arc, 0))
-
-        # Wave 7 W7-B: track_age_log1p = log1p(session_year - candidate_release_year)
-        # per candidate. Reconstructs session_year from the row's
-        # ``year_minus_2010_normalized`` column (a NUMBER alias of
-        # ``(session_year - 2010) / 4.0`` clipped to [-2, 2]). Without this
-        # override the positive row's track_age leaks as a constant target
-        # shortcut at training time — the W6_F6c collapse case.
-        if (
-            "track_age_log1p" in col_idx
-            and "year_minus_2010_normalized" in col_idx
-            and "_release_year_int_per_idx" in lookup
-        ):
-            cand_release_year = np.asarray(
-                lookup["_release_year_int_per_idx"][neg_arr],
-                dtype=np.int64,
-            )
-            year_norm = np.asarray(
-                input_list[col_idx["year_minus_2010_normalized"]],
-                dtype=np.float32,
-            )
-            session_year_int = (year_norm * 4.0 + 2010.0).round().astype(np.int64)
-            delta = session_year_int - cand_release_year
-            valid = cand_release_year > 0
-            delta = np.where(valid, np.maximum(delta, 0), 0)
-            delta = np.minimum(delta, 70)
-            _set("track_age_log1p", np.log1p(delta).astype(np.float32))
-
-        # iter83: target_tag_overlap_count = |cand.tags ∩ tags(prev_track_ids)|.
-        # Cross feature counting how many of the candidate's tag_ids appear
-        # across the row's previously-played tracks' tag sets. Uses tag_ids
-        # lookup (which has tags per track idx, since track ids are indexed
-        # by the framework). Padding tag idx 0 is excluded from set ops.
-        if "target_tag_overlap_count" in col_idx and "prev_track_ids" in col_idx and "tag_ids" in lookup:
-            tag_lut = lookup["tag_ids"]  # List[List[int]] indexed by track idx
-            prev_tracks = np.asarray(
-                input_list[col_idx["prev_track_ids"]],
-                dtype=np.int64,
-            )  # [B, L]
-            B = prev_tracks.shape[0]
-            overlap = np.zeros(B, dtype=np.int64)
-            cand_indices_int = neg_arr.astype(np.int64)
-            for b in range(B):
-                prev_tag_set: set = set()
-                for pi in prev_tracks[b]:
-                    pi_int = int(pi)
-                    if pi_int > 1:  # skip PAD (1) and OOV (0)
-                        prev_tag_set.update(t for t in tag_lut[pi_int] if t > 0)
-                if not prev_tag_set:
-                    continue
-                cand_idx = int(cand_indices_int[b])
-                if cand_idx <= 0:
-                    continue
-                cand_tags = {t for t in tag_lut[cand_idx] if t > 0}
-                overlap[b] = len(prev_tag_set & cand_tags)
-            _set("target_tag_overlap_count", overlap)
-
-        # iter84: target_artist_in_history = 1.0 if cand.artist_id ∈
-        # prev_artist_ids, else 0.0. Binary cross feature complementing
-        # the scalar `artist_repeat_count` (which counts occurrences).
-        # Uses the same _artist_per_idx + prev_artist_ids inputs as the
-        # artist_repeat_count block above. PAD/OOV artist indices (0 or
-        # _pad_artist) are excluded both target-side and history-side.
-        if "target_artist_in_history" in col_idx and "prev_artist_ids" in col_idx and "_artist_per_idx" in lookup:
-            cand_artists = np.asarray(
-                lookup["_artist_per_idx"][neg_arr],
-                dtype=np.int64,
-            )  # [B]
-            prev_artists = np.asarray(
-                input_list[col_idx["prev_artist_ids"]],
-                dtype=np.int64,
-            )  # [B, L]
-            pad_artist = lookup.get("_pad_artist", 0)
-            valid_prev = (prev_artists > 0) & (prev_artists != pad_artist)
-            valid_cand = (cand_artists > 0) & (cand_artists != pad_artist)
-            # Per-row: any prev artist equals cand artist (filtered)?
-            match = (cand_artists[:, None] == prev_artists) & valid_prev
-            present = match.any(axis=1) & valid_cand
-            _set("target_artist_in_history", present.astype(np.int64))
-
-        # iter91: target_album_in_history = 1.0 if cand.album_id ∈
-        # prev_album_ids, else 0.0. Mirrors V9F (artist) using album_id +
-        # prev_album_ids; complementary to `album_continuation` (which checks
-        # only the LAST prev album).
-        if "target_album_in_history" in col_idx and "prev_album_ids" in col_idx and "album_id" in lookup:
-            cand_albums_aih = np.asarray(
-                lookup["album_id"][neg_arr],
-                dtype=np.int64,
-            )  # [B]
-            prev_albums_aih = np.asarray(
-                input_list[col_idx["prev_album_ids"]],
-                dtype=np.int64,
-            )  # [B, L]
-            pad_album_aih = int(lookup.get("_pad_album", 0))
-            valid_prev_aih = (prev_albums_aih > 0) & (prev_albums_aih != pad_album_aih)
-            valid_cand_aih = (cand_albums_aih > 0) & (cand_albums_aih != pad_album_aih)
-            match_aih = (cand_albums_aih[:, None] == prev_albums_aih) & valid_prev_aih
-            present_aih = match_aih.any(axis=1) & valid_cand_aih
-            _set("target_album_in_history", present_aih.astype(np.int64))
-
-        # Computed: album_continuation = 1 if the candidate's album equals
-        # the most recent (last non-PAD) album in prev_album_ids
-        if "album_continuation" in col_idx and "prev_album_ids" in col_idx and "album_id" in lookup:
-            cand_albums = np.asarray(
-                lookup["album_id"][neg_arr],
-                dtype=np.int64,
-            )  # [B]
-            prev_albums = np.asarray(
-                input_list[col_idx["prev_album_ids"]],
-                dtype=np.int64,
-            )  # [B, L]
-            pad_album = lookup.get("_pad_album", 0)
-            B = prev_albums.shape[0]
-            cont = np.zeros(B, dtype=np.int64)
-            cand_valid = (cand_albums > 0) & (cand_albums != pad_album)
-            for b in range(B):
-                if not cand_valid[b]:
-                    continue
-                last = 0
-                for a in prev_albums[b][::-1]:
-                    a_int = int(a)
-                    if a_int > 0 and a_int != pad_album:
-                        last = a_int
-                        break
-                if last and last == int(cand_albums[b]):
-                    cont[b] = 1
-            _set("album_continuation", cont)
-
-        # v11 derived (Music CRS): seq_isrc_country_match_rate — fraction of
-        # the row's ``prev_isrc_country`` positions whose indexed value
-        # equals the candidate's ``track_isrc_country`` index. Both columns
-        # share a vocab (``same_index_as=track_isrc_country``) so the
-        # comparison works in indexed space without any string lookup.
-        if (
-            "seq_isrc_country_match_rate" in col_idx
-            and "prev_isrc_country" in col_idx
-            and "track_isrc_country" in lookup
-        ):
-            cand_isrc = np.asarray(
-                lookup["track_isrc_country"][neg_arr],
-                dtype=np.int64,
-            )  # [B]
-            prev_isrc = np.asarray(
-                input_list[col_idx["prev_isrc_country"]],
-                dtype=np.int64,
-            )  # [B, L]
-            # Treat OOV(0) and PAD(1) positions as "no value" so they don't
-            # bias the rate denominator; require candidate to be a real idx.
-            valid_pos = prev_isrc > 1
-            denom = valid_pos.sum(axis=1).astype(np.float32)
-            match = (prev_isrc == cand_isrc[:, None]) & valid_pos
-            num = match.sum(axis=1).astype(np.float32)
-            cand_valid = cand_isrc > 1
-            rate = np.where(
-                (denom > 0) & cand_valid,
-                num / np.maximum(denom, 1.0),
-                0.0,
-            )
-            _set("seq_isrc_country_match_rate", rate)
-
-        # v11 derived (Music CRS): track_mood_cluster_seq_match — same idea
-        # against ``prev_mood_clusters``. Same-vocab comparison via
-        # ``same_index_as=track_mood_cluster``.
-        if (
-            "track_mood_cluster_seq_match" in col_idx
-            and "prev_mood_clusters" in col_idx
-            and "track_mood_cluster" in lookup
-        ):
-            cand_mood = np.asarray(
-                lookup["track_mood_cluster"][neg_arr],
-                dtype=np.int64,
-            )  # [B]
-            prev_mood = np.asarray(
-                input_list[col_idx["prev_mood_clusters"]],
-                dtype=np.int64,
-            )  # [B, L]
-            valid_pos = prev_mood > 1
-            denom = valid_pos.sum(axis=1).astype(np.float32)
-            match = (prev_mood == cand_mood[:, None]) & valid_pos
-            num = match.sum(axis=1).astype(np.float32)
-            cand_valid = cand_mood > 1
-            rate = np.where(
-                (denom > 0) & cand_valid,
-                num / np.maximum(denom, 1.0),
-                0.0,
-            )
-            _set("track_mood_cluster_seq_match", rate)
-
+        updates = apply_candidate_features(
+            {name: input_list[i] for name, i in col_idx.items() if i < len(input_list)},
+            neg_item_indices,
+            self._input_columns,
+            lookup,
+            self._candidate_feature_fn,
+            item_column_name=self._project_config.item_column.name,
+        )
+        for name, values in updates.items():
+            input_list[col_idx[name]] = values
         return tuple(input_list)
 
     def __len__(self) -> int:
         return self._data_frame.shape[0]
 
     def _convert_dtype(self, value: np.ndarray, type: IOType) -> np.ndarray:
-        if type == IOType.INDEXABLE:
-            return value.astype(np.int64)
-        if type == IOType.NUMBER:
-            return value.astype(np.float32)
-        if type in (IOType.INT_ARRAY, IOType.INDEXABLE_ARRAY, IOType.SEQUENCE):
-            # Fast path: when all entries share the same length (the common
-            # case for padded sequences), ``np.asarray(list(value), dtype=...)``
-            # builds the 2-D array in C — 3-10× faster than the per-element
-            # comprehension fallback below, which materialises N intermediate
-            # np.array objects. Falls back transparently when entries have
-            # non-uniform shape (NumPy raises ValueError in that case).
-            try:
-                return np.asarray(list(value), dtype=np.int64)
-            except (ValueError, TypeError):
-                return np.array([np.array(v, dtype=np.int64) for v in value])
-        if type == IOType.FLOAT_ARRAY:
-            try:
-                return np.asarray(list(value), dtype=np.float32)
-            except (ValueError, TypeError):
-                return np.array([np.array(v, dtype=np.float32) for v in value])
-        return value
+        return convert_dtype(value, type)
 
     def __getitem__(
         self, indices: Union[int, List[int], slice]

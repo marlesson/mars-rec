@@ -82,6 +82,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from mars_rec.data.candidate_features import (
+    FN_PARAM as CANDIDATE_FN_PARAM,
+    LOOKUP_PARAM as CANDIDATE_LOOKUP_PARAM,
+    CandidateFeatureFn,
+    apply_candidate_features_to_frame,
+    resolve_candidate_lookup,
+    validate_candidate_feature_fn,
+)
 from mars_rec.data.dataset import (
     preprocess_interactions_data_frame,
     preprocess_metadata_data_frame,
@@ -1713,48 +1721,21 @@ class SupervisedModelTraining(TorchModelTraining):
 
     @property
     def _resolved_candidate_feature_lookup(self) -> Optional[Dict[str, Any]]:
-        """Return the candidate-feature lookup dict (cached, deferred resolve).
+        """Return the ``candidate_feature_lookup`` dict (resolved once, cached).
 
-        Reads ``project_config.dataset_extra_params["candidate_feature_lookup"]``.
-        Mirrors ``InteractionsDataset._resolve_candidate_lookup`` so that the
-        eval-time 101-candidate ranking step (``_create_ob_data_frame``) and
-        the train-time negative samplers apply the **same** override and stay
-        in sync. Returns ``None`` when the config didn't supply one — every
-        non-enhanced project keeps current behavior.
+        Uses the same resolver as ``InteractionsDataset`` so the eval-time
+        ranking step (``_create_ob_data_frame``) and the train-time negative
+        samplers see the same lookup.
         """
-        if hasattr(self, "_cached_candidate_feature_lookup"):
-            return self._cached_candidate_feature_lookup
-        raw = (self.project_config.dataset_extra_params or {}).get("candidate_feature_lookup")
-        if raw is None:
-            self._cached_candidate_feature_lookup = None
-            return None
-        if isinstance(raw, dict):
-            self._cached_candidate_feature_lookup = raw
-            return raw
-        if not callable(raw):
-            self._cached_candidate_feature_lookup = None
-            return None
-        import inspect as _inspect
-
-        try:
-            sig = _inspect.signature(raw)
-            arity = len(
-                [
-                    p
-                    for p in sig.parameters.values()
-                    if p.kind
-                    in (
-                        _inspect.Parameter.POSITIONAL_ONLY,
-                        _inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    )
-                    and p.default is _inspect.Parameter.empty
-                ]
-            )
-        except (TypeError, ValueError):
-            arity = 0
-        materialised = raw(self.index_mapping) if arity >= 1 else raw()
-        self._cached_candidate_feature_lookup = materialised if isinstance(materialised, dict) else None
+        if not hasattr(self, "_cached_candidate_feature_lookup"):
+            raw = (self.project_config.dataset_extra_params or {}).get(CANDIDATE_LOOKUP_PARAM)
+            self._cached_candidate_feature_lookup = resolve_candidate_lookup(raw, self.index_mapping)
         return self._cached_candidate_feature_lookup
+
+    @property
+    def _candidate_feature_fn(self) -> Optional[CandidateFeatureFn]:
+        """Return the project's ``candidate_feature_fn`` hook, if any."""
+        return validate_candidate_feature_fn((self.project_config.dataset_extra_params or {}).get(CANDIDATE_FN_PARAM))
 
     def _create_ob_data_frame(self, ob: dict, item_indices: List[int]) -> pd.DataFrame:
         data = [{**ob, self.project_config.item_column.name: item_index} for item_index in item_indices]
@@ -1762,74 +1743,19 @@ class SupervisedModelTraining(TorchModelTraining):
 
         ob_df = self._fill_hist_columns(ob_df)
 
-        # Per-candidate target-feature override — same semantics as the
-        # negative sampler hook in ``InteractionsDataset._apply_candidate_features``.
-        # Without this, every candidate in the 101-candidate ranking pool
-        # inherits the positive row's popularity / album_id / tag_ids /
-        # release_year_bucket / duration_bucket, and the model "ranks" by
-        # detecting feature-mismatch — a shortcut that doesn't transfer to
-        # full-catalog scoring.
-        lookup = self._resolved_candidate_feature_lookup
-        if lookup:
-            item_idx_arr = np.asarray(item_indices, dtype=np.int64)
-            for col in ("popularity", "release_year_bucket", "duration_bucket", "album_id"):
-                if col in ob_df.columns and col in lookup:
-                    ob_df[col] = lookup[col][item_idx_arr]
-            if "tag_ids" in ob_df.columns and "tag_ids" in lookup:
-                ob_df["tag_ids"] = [lookup["tag_ids"][i] for i in item_idx_arr]
-            # Computed features — mirror the dataset hook (vectorized)
-            if (
-                "artist_repeat_count" in ob_df.columns
-                and "prev_artist_ids" in ob_df.columns
-                and "_artist_per_idx" in lookup
-            ):
-                cand_artists = np.asarray(
-                    lookup["_artist_per_idx"][item_idx_arr],
-                    dtype=np.int64,
-                )
-                pad_artist = lookup.get("_pad_artist", 0)
-                prev_values = ob_df["prev_artist_ids"].values
-                # Vectorized: stack prev arrays into a matrix and compare
-                # All rows share the same prev_artist_ids (same observation),
-                # so we can broadcast efficiently.
-                if len(prev_values) > 0:
-                    prev_matrix = np.array(prev_values.tolist(), dtype=np.int64)
-                    cand_col = cand_artists.reshape(-1, 1)
-                    # Mask invalid candidates
-                    valid_mask = (cand_artists > 0) & (cand_artists != pad_artist)
-                    counts = (prev_matrix == cand_col).sum(axis=1)
-                    arc_vals = np.where(valid_mask, counts, 0)
-                else:
-                    arc_vals = np.zeros(len(ob_df), dtype=np.int64)
-                ob_df["artist_repeat_count"] = arc_vals
-            if "album_continuation" in ob_df.columns and "prev_album_ids" in ob_df.columns and "album_id" in lookup:
-                cand_albums = np.asarray(
-                    lookup["album_id"][item_idx_arr],
-                    dtype=np.int64,
-                )
-                pad_album = lookup.get("_pad_album", 0)
-                prev_values = ob_df["prev_album_ids"].values
-                # Vectorized: find last valid album in each prev sequence
-                if len(prev_values) > 0:
-                    prev_matrix = np.array(prev_values.tolist(), dtype=np.int64)
-                    # Find last non-pad, non-zero album per row (scan from right)
-                    n_rows, seq_len = prev_matrix.shape
-                    # Create mask of valid positions
-                    valid_pos = (prev_matrix > 0) & (prev_matrix != pad_album)
-                    # Get index of last valid position per row
-                    # Use argmax on flipped valid_pos to find first True from right
-                    flipped = valid_pos[:, ::-1]
-                    has_valid = valid_pos.any(axis=1)
-                    last_idx = seq_len - 1 - flipped.argmax(axis=1)
-                    # Extract last valid album
-                    last_albums = prev_matrix[np.arange(n_rows), last_idx]
-                    last_albums = np.where(has_valid, last_albums, 0)
-                    # Compare with candidate
-                    valid_cand = (cand_albums > 0) & (cand_albums != pad_album)
-                    cont_vals = np.where(valid_cand & (last_albums == cand_albums), 1, 0)
-                else:
-                    cont_vals = np.zeros(len(ob_df), dtype=np.int64)
-                ob_df["album_continuation"] = cont_vals
+        # Rewrite item-dependent columns for each candidate with the same
+        # helper the negative samplers use. Without it every candidate in the
+        # ranking pool inherits the positive row's item features, and the
+        # model "ranks" by spotting the mismatch: a shortcut that does not
+        # transfer to full-catalog scoring.
+        apply_candidate_features_to_frame(
+            ob_df,
+            np.asarray(item_indices, dtype=np.int64),
+            self.project_config.input_columns,
+            self._resolved_candidate_feature_lookup,
+            self._candidate_feature_fn,
+            item_column_name=self.project_config.item_column.name,
+        )
 
         if self.project_config.output_column.name not in ob_df.columns:
             ob_df[self.project_config.output_column.name] = 1

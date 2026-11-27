@@ -176,7 +176,7 @@ class CompositeProvider(CandidateProvider):
     - ``union_filters`` (additive): each mask is OR-ed *into* the result.
       Permissive — a candidate that any union filter likes is included
       even if some intersection filter rejects it. Useful for "always
-      include the user's last artist's catalog" style boosts.
+      include items from the user's last category" style boosts.
 
     Final mask = (AND over filters) ∪ (OR over union_filters). When
     ``filters`` is empty the AND part defaults to all-True (i.e. starts

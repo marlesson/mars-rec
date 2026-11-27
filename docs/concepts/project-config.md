@@ -98,3 +98,50 @@ the training task attaches `DynamicNegativeMiningCallback` for them automaticall
 options, see the [`mars_rec.data.dataset` reference](../reference/api/data.md#mars_rec.data.dataset).
 
 The amount of negative sampling is set at training time with `--negative-proportion`.
+
+### Item-dependent features for candidates
+
+A negative sample is a positive row with the item id swapped, and the ranking evaluation scores
+the same row against many candidate items. Any input column that describes *the item*
+(its category, price, popularity...) must then describe the new item. Otherwise it still holds
+the original item's value, and the model learns to spot the mismatch instead of learning to rank.
+
+Two optional entries of `dataset_extra_params` handle this:
+
+| Key | Value | Effect |
+|---|---|---|
+| `candidate_feature_lookup` | `dict`, or a callable `() -> dict` / `(index_mapping) -> dict` | **Direct lookups.** Each key that is also an input column (other than the item column) is replaced by `values[candidate_idx]`, where `values` is an array (or a list of lists, for array columns) indexed by item index. Keys starting with `_` are private data for the hook and never touch a column. |
+| `candidate_feature_fn` | `(columns, candidate_idx, lookup) -> dict` | **Computed features.** `columns` maps each input column name to its batch array, with the direct lookups already applied. The hook returns `{column_name: new_batch_values}`; values are cast to each column's `IOType`. |
+
+```python
+def category_in_history(columns, candidate_idx, lookup):
+    hist = columns["hist_categories"]            # [B, L]
+    cand = columns["category"]                   # candidate's category (direct lookup)
+    valid = hist != lookup["_category_pad"]
+    return {"category_in_history": ((hist == cand[:, None]) & valid).sum(axis=1)}
+
+
+my_project = ProjectConfig(
+    ...,
+    dataset_extra_params={
+        "candidate_feature_lookup": lambda index_mapping: {
+            "category": category_by_item_idx,    # np.ndarray, indexed by item idx
+            "_category_pad": 0,
+        },
+        "candidate_feature_fn": category_in_history,
+    },
+)
+```
+
+The same code ([`mars_rec.data.candidate_features`](../reference/api/data.md#mars_rec.data.candidate_features))
+runs in every negative sampler, in the training-time ranking evaluation and in
+`score_candidates_bce` at inference, so the three cannot drift apart. At inference, passing
+`candidate_feature_overrides` replaces this default.
+
+!!! warning "Migrating from earlier versions"
+    Earlier versions recomputed a fixed set of derived columns implicitly from `_`-prefixed lookup
+    keys. That logic was specific to one project and has been removed: move those computations into
+    a `candidate_feature_fn`. A lookup with `_`-prefixed keys and no hook now emits a `UserWarning`.
+    Direct lookups now apply to **every** lookup key that names an input column, not only to a fixed
+    list of names, and an invalid lookup (not a dict or callable) raises `TypeError` instead of
+    being ignored in the evaluation path.
