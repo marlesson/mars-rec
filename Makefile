@@ -144,7 +144,7 @@ test-cov:
 
 ## CI entry point: full suite + branch coverage, failing below the floor.
 ## Raise COV_FAIL_UNDER as coverage improves; never lower it to merge.
-COV_FAIL_UNDER ?= 70
+COV_FAIL_UNDER ?= 78
 test-ci:
 	$(PYTEST) $(TESTS) --cov=$(SRC) --cov-branch --cov-report=term --cov-fail-under=$(COV_FAIL_UNDER)
 

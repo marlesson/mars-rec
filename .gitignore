@@ -75,3 +75,7 @@ lightning_logs/
 mlruns/
 logs/
 output_v8/
+# Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
