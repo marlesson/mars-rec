@@ -1899,7 +1899,7 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
 
     Args:
         provider_extras: forwarded to ``resolve_candidate_provider`` (e.g.
-            ``{"strategy": "bm25_2k_union_cfbpr_2k", "min_pool": 500}``).
+            ``{"strategy": "<project-defined strategy>", "min_pool": 500}``).
         precompute_eligibles: if True (default), call provider once per
             row at init and cache the result. Set False to use the legacy
             per-row provider call (slower; deadlocks under multi-worker

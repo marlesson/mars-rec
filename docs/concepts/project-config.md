@@ -81,6 +81,20 @@ live in [`mars_rec.data.dataset`](../reference/api/data.md):
 | `InteractionsWithNegativeItemGenerationDataset` | Uniformly sampled from the full catalogue |
 | `InteractionsWithNegativeItemGenerationByAvailableItemsDataset` | Sampled from the per-row slate (`available_items_column_name`) |
 | `InteractionsWithPopularityBasedNegativeSamplingDataset` | Sampled proportionally to item popularity |
-| `InteractionsWithHardNegativeMiningDataset` | Hard negatives mined from a candidate pool |
+| `InteractionsWithInBatchNegativesDataset` | Positives of other rows in the same batch |
+| `InteractionsWithTimeAwareNegativeSamplingDataset` | Only items that already existed at interaction time |
+| `InteractionsWithCurriculumNegativeSamplingDataset` | Progressively harder negatives as training advances |
+| `InteractionsWithHardNegativeMiningDataset` | Pre-computed hard negatives stored in a column (random fallback) |
+| `InteractionsWithEmbeddingHardNegativeDataset` | Pre-computed top-K nearest-neighbour table |
+| `InteractionsWithCandidateProviderNegativeDataset` | The project's `CandidateProvider` eligible pool |
+| `InteractionsWithDynamicNegativeMiningDataset` | Dynamic negative sampling (DNS): highest-scoring of K candidates under the current model |
+| `InteractionsWithDynamicNegativeMiningCandidateProviderDataset` | DNS over candidates drawn from a `CandidateProvider` pool |
+| `InteractionsWithMixedDnsUniformDataset` | Per-slot mix of uniform and DNS negatives |
+| `InteractionsWithMixedHardNegativeDataset` | Mixture of three negative sources with per-class proportions |
+
+Class-specific constructor arguments (for example `hard_negative_column` or `uniform_fraction`)
+go in `ProjectConfig.dataset_extra_params`. The DNS variants need the current model's scores, so
+the training task attaches `DynamicNegativeMiningCallback` for them automatically. For each class's
+options, see the [`mars_rec.data.dataset` reference](../reference/api/data.md#mars_rec.data.dataset).
 
 The amount of negative sampling is set at training time with `--negative-proportion`.

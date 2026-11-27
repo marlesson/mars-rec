@@ -45,7 +45,12 @@ mars-rec predict \
 }
 ```
 
-`--data` accepts `.parquet` or `.csv`.
+`--data` accepts `.parquet` or `.csv`. Keep in mind:
+
+- the key is always `top10s`, whatever the value of `--top-k`;
+- the result never contains [reserved index slots](../concepts/index-mapping.md#reserved-slots):
+  unknown / `NaN` / pad logits are masked before the top-k is taken, so every user gets `k` real items
+  (when the catalogue has at least `k` items).
 
 ## Re-evaluation: `mars-rec evaluate`
 
@@ -74,7 +79,8 @@ mars-rec predict \
     The file must contain the target column. It is preprocessed with the training pipeline.
 
 Both flows write ranking metrics (NDCG, HitRate, MRR, MAP @{5, 10, 20}) and ROC-AUC to
-`metadata.json`, where `list` and `results` pick them up.
+`metadata.json`, where `list` and `results` pick them up. ROC-AUC is omitted when the evaluated
+split has a single class, since it is undefined there.
 
 `--prefilter` applies the project's
 [`CandidateProvider`][mars_rec.filtering.CandidateProvider] when it builds the candidate pool for

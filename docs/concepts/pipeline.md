@@ -8,12 +8,12 @@ flowchart TD
     A["1 · Data task<br/>(download / generate raw data)"] --> B
     B["2 · BasePrepareDataFrames subclass<br/>filter → split → balance → train/val/test CSVs"] --> C
     C["3 · SupervisedModelTraining"]
-    C --> C1["build index_mapping"]
-    C1 --> C2["instantiate RecommenderModule<br/>inside RecommenderLightningModule"]
-    C2 --> C3["train with PyTorch Lightning<br/>EarlyStopping · Checkpoint · CSV (+ TensorBoard)"]
-    C3 --> C4["evaluate on validation"]
-    C4 --> C5["predict on test<br/>optional ranking metrics + ROC-AUC"]
-    C5 --> C6["write artifacts<br/>weights.ckpt · history.csv · params.json · metadata.json · architecture.svg"]
+    C --> C1["build index_mapping + datasets"]
+    C1 --> C2["create_module()<br/>summary.txt · sample_train.csv · architecture.svg"]
+    C2 --> C3["trainer.fit() in RecommenderLightningModule<br/>EarlyStopping · Checkpoint · CSV (+ TensorBoard)"]
+    C3 --> C4["after_fit(): score the test split<br/>test_set_predictions.csv · optional ranking metrics + ROC-AUC"]
+    C4 --> C5["evaluate(): metrics on validation"]
+    C5 --> C6["write metadata.json<br/>(weights.ckpt · history.csv · params.json already on disk)"]
 ```
 
 ## 1. Raw data
@@ -51,15 +51,47 @@ mars-rec run data examples.movielens.data PrepareMovieLensDataFrame
 ## 3. Training and evaluation
 
 [`SupervisedModelTraining`][mars_rec.simulation.training.SupervisedModelTraining] loads the CSVs,
-builds the [index mapping](index-mapping.md), wraps your model in
-[`RecommenderLightningModule`][mars_rec.torch.lightning_module.RecommenderLightningModule] and
-trains it. It then:
+builds the [index mapping](index-mapping.md) and the datasets, then:
 
-- evaluates on validation with the configured `metrics`;
-- scores the test split and writes `test_set_predictions.csv`;
-- with `ranking_metrics=True`, computes NDCG / HitRate / MRR / MAP @{5, 10, 20} and ROC-AUC into
-  `metadata.json`;
-- renders `architecture.svg` next to the checkpoint.
+1. instantiates your model and writes `summary.txt`, `sample_train.csv` and `architecture.svg`;
+2. wraps it in
+   [`RecommenderLightningModule`][mars_rec.torch.lightning_module.RecommenderLightningModule] and
+   trains it, writing `weights.ckpt`, `history.csv` and `plot_history.jpg`;
+3. scores the test split into `test_set_predictions.csv`. With `ranking_metrics=True` it also
+   computes NDCG / HitRate / MRR / MAP @{5, 10, 20} and ROC-AUC;
+4. evaluates the configured `metrics` on the validation split;
+5. writes `metadata.json`.
+
+### Customising the training task
+
+The steps above are methods of
+[`TorchModelTraining`][mars_rec.simulation.training.TorchModelTraining]. To change one of them,
+subclass `SupervisedModelTraining` in your project, override the hook you need, and run it with
+`--task-class`:
+
+| Hook | Override it to… |
+|---|---|
+| `create_module()` | build the model differently (e.g. load pretrained weights) |
+| `create_lightning_module(module)` | wrap the model in a custom `LightningModule` |
+| `create_trainer()` | add Lightning callbacks or change trainer flags |
+| `get_train_generator()` / `get_val_generator()` / `get_test_generator()` | change how batches are sampled |
+| `after_fit()` | write extra artifacts after training (call `super().after_fit()`) |
+| `evaluate()` | change the validation evaluation |
+
+```python title="my_project/training.py"
+from mars_rec.simulation.training import SupervisedModelTraining
+
+
+class MyTraining(SupervisedModelTraining):
+    def create_trainer(self, log_every_n_steps: int = 50):
+        trainer = super().create_trainer(log_every_n_steps)
+        ...  # e.g. trainer.callbacks.append(MyCallback())
+        return trainer
+```
+
+```bash
+mars-rec run supervised --task-class my_project.training.MyTraining --project ... --recommender-module-class ...
+```
 
 For every knob, see [Training parameters](../guides/training-parameters.md).
 

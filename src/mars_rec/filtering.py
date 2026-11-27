@@ -61,6 +61,7 @@ class CandidateProvider(ABC):
         """
 
     def name(self) -> str:
+        """Human-readable identifier used in logs and diagnostics (defaults to the class name)."""
         return type(self).__name__
 
 
@@ -96,6 +97,7 @@ class CandidateFilter(ABC):
         return None
 
     def name(self) -> str:
+        """Human-readable identifier used in logs and diagnostics (defaults to the class name)."""
         return type(self).__name__
 
 
@@ -112,6 +114,7 @@ class FullCatalogProvider(CandidateProvider):
     """
 
     def get_candidates(self, row, full_catalog):
+        """Return ``full_catalog`` unchanged."""
         return full_catalog
 
     def rank(
@@ -152,6 +155,7 @@ class AvailableItemsColumnProvider(CandidateProvider):
         self.column_name = column_name
 
     def get_candidates(self, row, full_catalog):
+        """Return the indices stored in ``row[column_name]``, or ``full_catalog`` when missing/empty."""
         items = row.get(self.column_name)
         if items is None:
             return full_catalog
