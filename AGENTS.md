@@ -6,6 +6,29 @@ This document guides AI agents (Claude Code, Copilot, Cursor, etc.) on how to na
 
 **All documentation, code comments, commit messages, and PR descriptions in this project MUST be written in English.** This is an international project and English is the standard language across all artifacts.
 
+## Work in a git worktree (mandatory)
+
+**Every task that modifies files MUST be done in a dedicated git worktree, never directly in the main checkout.** The main checkout may hold someone else's in-progress work (or another agent's); a worktree isolates each task on its own branch.
+
+1. Create the worktree under `.claude/worktrees/` (gitignored), branching from an up-to-date `main` and using the branch prefixes from `CONTRIBUTING.md`:
+   ```bash
+   git fetch origin main
+   git worktree add .claude/worktrees/<short-name> -b <type>/<short-name> origin/main
+   cd .claude/worktrees/<short-name>
+   ```
+   Claude Code agents can use the built-in `EnterWorktree` tool instead, which does the same thing.
+2. Run every command (edits, `make lint`, `make test`, git) from inside the worktree. Do not `cd` back to the main checkout to work.
+3. **Set `PYTHONPATH=src:.`** for anything that imports `mars_rec`. The shared `.venv` has an *editable install pointing at the main checkout's `src/`*, so without it Python silently loads the main checkout's code, not the worktree's:
+   ```bash
+   PYTHONPATH=src:. make test
+   PYTHONPATH=src:. python -c "import mars_rec; print(mars_rec.__file__)"  # must print a path inside the worktree
+   ```
+4. Training outputs default to `output/` relative to the current directory, so runs started in a worktree stay in that worktree. Set `OUTPUT_PATH` explicitly to reuse cached datasets/runs from the main checkout.
+5. Do not use bare `git stash` / `git stash pop`: the stash stack is shared across all worktrees. Use a temporary WIP commit instead.
+6. When the branch is merged (or abandoned), remove the worktree: `git worktree remove .claude/worktrees/<short-name>` and delete the branch.
+
+Read-only tasks (answering questions, reviewing code, exploring) do not need a worktree.
+
 ## Project overview
 
 MARS-Rec is a framework for training deep learning models for recommendation systems. It uses Luigi for pipeline orchestration, PyTorch for models, and PyTorch Lightning for the training loop. It contains no Reinforcement Learning, bandits, or exploration policy code.
@@ -178,6 +201,8 @@ Columns of type `IOType.INDEXABLE` are converted from categorical values to inte
 - Index `2` is reserved for `-1` / `"-1"` (the pad token for sequence columns)
 - Actual values start at `3`
 
+Inference never returns a reserved slot as a recommendation: `build_reverse_item_mapping` drops them and `predict_top_k` masks their logits.
+
 ### 6. Luigi caching and --no-cache
 
 Luigi marks tasks as DONE based on the existence of output files. If a training run fails midway but the output directory was already created, Luigi may consider the task complete. To force re-execution:
@@ -342,8 +367,9 @@ GCP-touching `make` targets (`docker-push`, `docker-pull`,
 python -c "from mars_rec.simulation.training import SupervisedModelTraining; print('OK')"
 python -c "from mars_rec.inference import run_inference, run_evaluate; print('OK')"
 
-# 2. Unit tests
+# 2. Unit tests (CI runs `make test-ci`: same suite + branch-coverage floor)
 make test
+make test-ci
 
 # 3. End-to-end test with MovieLens 100K slate sample (small + fast)
 PYTHONPATH=src:. python examples/movielens100k_slate/run_training.py

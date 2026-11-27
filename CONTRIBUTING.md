@@ -18,6 +18,7 @@ Optional: run lint automatically on every commit with `pip install pre-commit &&
 1. `main` is protected; every change goes through a pull request with green CI.
 2. Create a short-lived branch from `main` using a type prefix:
    `feat/…`, `fix/…`, `docs/…`, `refactor/…`, `test/…`, `chore/…`, `ci/…`.
+   AI agents must do this in a dedicated git worktree — see *Work in a git worktree* in [`AGENTS.md`](AGENTS.md).
 3. Before pushing, run:
    ```bash
    make format   # autofix + format with ruff

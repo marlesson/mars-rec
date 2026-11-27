@@ -284,12 +284,8 @@ class TestPredictTopK:
 
 class TestBuildReverseItemMapping:
     def test_skips_reserved_indices(self):
-        """OOV (0) and PAD (1) must NOT appear in the reverse map — the
-        downstream consumer treats them as "no prediction"."""
-        idx_mapping = {"item_id": {"oov_marker": 0, np.nan: 1, "-1": 2, "real": 3, "real2": 4}}
+        """OOV (0), NaN (1) and PAD/-1 (2) must NOT appear in the reverse
+        map — otherwise the PAD token can be returned as a recommendation."""
+        idx_mapping = {"item_id": {"oov_marker": 0, None: 1, np.nan: 1, -1: 2, "-1": 2, "real": 3, "real2": 4}}
         rev = build_reverse_item_mapping(idx_mapping, "item_id")
-        # Per inference.py:294, idx <= 1 is skipped; idx 2 (PAD/-1) IS kept.
-        assert 0 not in rev
-        assert 1 not in rev
-        assert rev.get(3) == "real"
-        assert rev.get(4) == "real2"
+        assert rev == {3: "real", 4: "real2"}
