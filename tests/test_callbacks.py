@@ -8,6 +8,7 @@ through the trainer to inject the live model into each dataset that
 exposes ``set_model``. Without this, DNS-style samplers stay on their
 uniform-fallback path and a "DNS run" silently degenerates to random.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -41,6 +42,7 @@ def _make_trainer(train_dl, val_dl, device="cpu"):
 
 def _make_lit_module(model_obj):
     """A bare object exposing ``recommender_module`` so ``_resolve_model`` picks it."""
+
     class _LM:
         pass
 
@@ -92,6 +94,7 @@ class TestDNSCallbackHooks:
     def test_on_train_start_is_noop_when_dataset_lacks_set_model(self):
         """Datasets that don't expose ``set_model`` must be silently skipped —
         not raise — so non-DNS projects can keep the callback installed."""
+
         class _PlainDS:
             pass
 

@@ -13,6 +13,7 @@ mars-rec: it shows how a sequence column declared as
 ``IOType.INDEXABLE_ARRAY`` with ``same_index_as=item_column`` is consumed
 end-to-end with a single shared item embedding.
 """
+
 from typing import Any, Dict
 
 import torch
@@ -44,7 +45,9 @@ class LastFMSASRec(RecommenderModule):
         # ``RecommenderModule`` from the index_mapping. history_artist_ids
         # shares this vocabulary (via ``same_index_as``).
         self.item_emb = nn.Embedding(
-            self._n_items, n_factors, padding_idx=PAD_INDEX,
+            self._n_items,
+            n_factors,
+            padding_idx=PAD_INDEX,
         )
         self.pos_emb = nn.Embedding(history_len, n_factors)
         self.history_len = history_len
@@ -62,7 +65,8 @@ class LastFMSASRec(RecommenderModule):
 
         # Causal mask: position i can only attend to positions <= i.
         causal = torch.triu(
-            torch.ones(history_len, history_len, dtype=torch.bool), diagonal=1,
+            torch.ones(history_len, history_len, dtype=torch.bool),
+            diagonal=1,
         )
         self.register_buffer("causal_mask", causal)
 

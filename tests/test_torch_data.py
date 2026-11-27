@@ -7,6 +7,7 @@ Custom DataLoader plumbing that the framework relies on for performance:
   custom datasets that return pre-packed numpy arrays (the InteractionsDataset
   pattern) don't get re-converted per batch.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -35,6 +36,7 @@ class _SimpleDataset(Dataset):
 # ---------------------------------------------------------------------------
 # FasterBatchSampler
 # ---------------------------------------------------------------------------
+
 
 class TestFasterBatchSampler:
     def test_yields_expected_batch_sizes_no_drop_last(self):
@@ -79,16 +81,12 @@ class TestFasterBatchSampler:
     def test_sample_weights_must_be_non_negative(self):
         ds = _SimpleDataset(5)
         with pytest.raises(ValueError, match="non-negative"):
-            FasterBatchSampler(
-                ds, batch_size=2, sample_weights=torch.tensor([1.0, -0.1, 1.0, 1.0, 1.0])
-            )
+            FasterBatchSampler(ds, batch_size=2, sample_weights=torch.tensor([1.0, -0.1, 1.0, 1.0, 1.0]))
 
     def test_sample_weights_zero_sum_raises(self):
         ds = _SimpleDataset(5)
         with pytest.raises(ValueError, match="positive value"):
-            FasterBatchSampler(
-                ds, batch_size=2, sample_weights=torch.zeros(5)
-            )
+            FasterBatchSampler(ds, batch_size=2, sample_weights=torch.zeros(5))
 
     def test_sample_weights_biases_sampling(self):
         """A weight vector dominated by one index → that index dominates samples."""
@@ -105,6 +103,7 @@ class TestFasterBatchSampler:
 # ---------------------------------------------------------------------------
 # NoAutoCollationDataLoader
 # ---------------------------------------------------------------------------
+
 
 class TestNoAutoCollationDataLoader:
     def test_auto_collation_disabled(self):

@@ -5,6 +5,7 @@ Tests the three target-aware features added in Phase 3:
   - seq_isrc_country_match_rate (computed against row's prev_isrc_country)
   - track_mood_cluster_seq_match (computed against row's prev_mood_clusters)
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -25,11 +26,9 @@ def project_config_v11():
         user_column=Column("user_id", IOType.INDEXABLE),
         item_column=Column("track_id", IOType.INDEXABLE),
         other_input_columns=[
-            Column("prev_isrc_country", IOType.INDEXABLE_ARRAY,
-                   same_index_as="track_isrc_country"),
+            Column("prev_isrc_country", IOType.INDEXABLE_ARRAY, same_index_as="track_isrc_country"),
             Column("track_isrc_country", IOType.INDEXABLE),
-            Column("prev_mood_clusters", IOType.INDEXABLE_ARRAY,
-                   same_index_as="track_mood_cluster"),
+            Column("prev_mood_clusters", IOType.INDEXABLE_ARRAY, same_index_as="track_mood_cluster"),
             Column("track_mood_cluster", IOType.INDEXABLE),
             Column("seq_isrc_country_match_rate", IOType.NUMBER),
             Column("track_mood_cluster_seq_match", IOType.NUMBER),
@@ -44,17 +43,19 @@ def project_config_v11():
 
 def _build_dataset(project_config_v11):
     """Minimal dataset with two rows + a candidate lookup."""
-    df = pd.DataFrame({
-        "user_id": [10, 20],
-        "track_id": [100, 200],
-        "prev_isrc_country": [[2, 3, 2, 0, 0], [4, 4, 4, 4, 4]],
-        "track_isrc_country": [2, 4],
-        "prev_mood_clusters": [[5, 5, 6, 0, 0], [7, 7, 7, 8, 0]],
-        "track_mood_cluster": [5, 7],
-        "seq_isrc_country_match_rate": [0.0, 0.0],
-        "track_mood_cluster_seq_match": [0.0, 0.0],
-        "label": [1.0, 1.0],
-    })
+    df = pd.DataFrame(
+        {
+            "user_id": [10, 20],
+            "track_id": [100, 200],
+            "prev_isrc_country": [[2, 3, 2, 0, 0], [4, 4, 4, 4, 4]],
+            "track_isrc_country": [2, 4],
+            "prev_mood_clusters": [[5, 5, 6, 0, 0], [7, 7, 7, 8, 0]],
+            "track_mood_cluster": [5, 7],
+            "seq_isrc_country_match_rate": [0.0, 0.0],
+            "track_mood_cluster_seq_match": [0.0, 0.0],
+            "label": [1.0, 1.0],
+        }
+    )
     # Build a fake candidate lookup keyed by item idx 0..3:
     #   idx 1 = track_a (isrc=2, mood=5) — matches row 0 prev_isrc[2,3,2]
     #   idx 2 = track_b (isrc=3, mood=6) — matches row 0 prev_isrc only at pos 1

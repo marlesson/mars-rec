@@ -13,31 +13,27 @@ Highlights:
 - Miscellaneous helpers (filename sanitisation, confidence intervals,
   date conversion, file walking, …).
 """
+
 import os
 import ast
+import string
+import unicodedata
 import logging
 from datetime import datetime, timedelta
 from multiprocessing.pool import Pool
-from typing import List, Union, Dict, Tuple
-from zipfile import ZipFile
+from typing import Union
 import json
 import scipy
 import numpy as np
 import pandas as pd
-from math import sqrt
 from tqdm import tqdm
-import shutil
 from random import randrange
 
-from mars_rec.utils.files import get_params, get_task_dir
 
 logger = logging.getLogger(__name__)
 
-"""
-Url: https://gist.github.com/wassname/1393c4a57cfcbf03641dbc31886123b8
-"""
-import unicodedata
-import string
+# Filename sanitisation adapted from
+# https://gist.github.com/wassname/1393c4a57cfcbf03641dbc31886123b8
 
 valid_filename_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
 char_limit = 255
@@ -65,9 +61,7 @@ def clean_filename(filename, whitelist=valid_filename_chars, replace=" "):
         filename = filename.replace(r, "_")
 
     # keep only valid ascii chars
-    cleaned_filename = (
-        unicodedata.normalize("NFKD", filename).encode("ASCII", "ignore").decode()
-    )
+    cleaned_filename = unicodedata.normalize("NFKD", filename).encode("ASCII", "ignore").decode()
 
     # keep only whitelisted chars
     cleaned_filename = "".join(c for c in cleaned_filename if c in whitelist)
@@ -85,9 +79,7 @@ def chunks(l: Union[list, range], n: int) -> Union[list, range]:
         yield l[i : i + n]
 
 
-def parallel_literal_eval(
-    series: Union[pd.Series, np.ndarray], pool: Pool = None, use_tqdm: bool = True
-) -> list:
+def parallel_literal_eval(series: Union[pd.Series, np.ndarray], pool: Pool = None, use_tqdm: bool = True) -> list:
     """Parse a Series of Python-literal strings in parallel.
 
     Skips parsing when the first element is already a parsed object
@@ -102,7 +94,7 @@ def parallel_literal_eval(
     # Skip parsing if elements are already parsed (not strings)
     first = series.iloc[0] if isinstance(series, pd.Series) else series[0]
     if not isinstance(first, str):
-        return series.tolist() if hasattr(series, 'tolist') else list(series)
+        return series.tolist() if hasattr(series, "tolist") else list(series)
 
     if pool:
         return _parallel_literal_eval(series, pool, use_tqdm)
@@ -141,9 +133,7 @@ def to_array(xs):
     """
     return (
         [
-            literal_eval_if_str(c)
-            if isinstance(literal_eval_if_str(c), int)
-            else literal_eval_if_str(c)[0]
+            literal_eval_if_str(c) if isinstance(literal_eval_if_str(c), int) else literal_eval_if_str(c)[0]
             for c in literal_eval_if_str(xs)
         ]
         if xs is not None
@@ -151,9 +141,7 @@ def to_array(xs):
     )
 
 
-def _parallel_literal_eval(
-    series: Union[pd.Series, np.ndarray], pool: Pool, use_tqdm: bool = True
-) -> list:
+def _parallel_literal_eval(series: Union[pd.Series, np.ndarray], pool: Pool, use_tqdm: bool = True) -> list:
     chunksize = max(1, len(series) // (os.cpu_count() * 4))
     if use_tqdm:
         return list(tqdm(pool.map(literal_eval_if_str, series, chunksize=chunksize), total=len(series)))
@@ -224,10 +212,10 @@ def reduce_df_mem(df, without_columns=[]):
         col_type = df[col].dtype
         if col in without_columns:
             continue
-        if col_type != object:
+        if col_type != object:  # noqa: E721  (dtype vs. object comparison is intentional)
             c_min = df[col].min()
             c_max = df[col].max()
-            if str(col_type)[:3] == 'int':
+            if str(col_type)[:3] == "int":
                 if c_min > np.iinfo(np.int8).min and c_max < np.iinfo(np.int8).max:
                     df[col] = df[col].astype(np.int8)
                 elif c_min > np.iinfo(np.uint8).min and c_max < np.iinfo(np.uint8).max:
@@ -244,7 +232,7 @@ def reduce_df_mem(df, without_columns=[]):
                     df[col] = df[col].astype(np.int64)
                 elif c_min > np.iinfo(np.uint64).min and c_max < np.iinfo(np.uint64).max:
                     df[col] = df[col].astype(np.uint64)
-            elif str(col_type)[:5] == 'float':
+            elif str(col_type)[:5] == "float":
                 if c_min > np.finfo(np.float16).min and c_max < np.finfo(np.float16).max:
                     df[col] = df[col].astype(np.float16)
                 elif c_min > np.finfo(np.float32).min and c_max < np.finfo(np.float32).max:
@@ -256,7 +244,8 @@ def reduce_df_mem(df, without_columns=[]):
     if start_mem > 0:
         logger.debug(
             "reduce_df_mem: %.1f → %.1f MiB (-%.1f%%)",
-            start_mem, end_mem,
+            start_mem,
+            end_mem,
             100 * (start_mem - end_mem) / start_mem,
         )
 

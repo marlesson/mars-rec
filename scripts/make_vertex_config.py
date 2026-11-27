@@ -11,10 +11,10 @@ Usage:
         [--gpu-type NVIDIA_L4 --gpu-count 1] [--spot] \
         --out /tmp/vertex-job.json
 """
+
 import argparse
 import json
 import shlex
-import sys
 
 p = argparse.ArgumentParser()
 p.add_argument("--image", required=True)
@@ -23,7 +23,8 @@ p.add_argument("--args", required=True)
 p.add_argument("--aip-model-dir", required=True)
 p.add_argument("--data-uri", default="")
 p.add_argument(
-    "--dataset-gcs-prefix", default="",
+    "--dataset-gcs-prefix",
+    default="",
     help=(
         "Optional GCS prefix (gs://bucket/path/) the entrypoint will rsync "
         "into OUTPUT_PATH/<experiment>/dataset/. Use for offline-precomputed "
@@ -32,8 +33,7 @@ p.add_argument(
 )
 p.add_argument("--gpu-type", default="")
 p.add_argument("--gpu-count", default="")
-p.add_argument("--spot", action="store_true",
-               help="Use Spot/preemptible VM pricing (adds scheduling.strategy=SPOT).")
+p.add_argument("--spot", action="store_true", help="Use Spot/preemptible VM pricing (adds scheduling.strategy=SPOT).")
 p.add_argument("--out", required=True)
 a = p.parse_args()
 
@@ -51,15 +51,17 @@ if a.gpu_type:
     machine_spec["acceleratorCount"] = int(a.gpu_count or 1)
 
 spec = {
-    "workerPoolSpecs": [{
-        "machineSpec": machine_spec,
-        "replicaCount": "1",
-        "containerSpec": {
-            "imageUri": a.image,
-            "args": container_args,
-            "env": env,
-        },
-    }]
+    "workerPoolSpecs": [
+        {
+            "machineSpec": machine_spec,
+            "replicaCount": "1",
+            "containerSpec": {
+                "imageUri": a.image,
+                "args": container_args,
+                "env": env,
+            },
+        }
+    ]
 }
 if a.spot:
     spec["scheduling"] = {"strategy": "SPOT"}

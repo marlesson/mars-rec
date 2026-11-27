@@ -20,6 +20,7 @@ Each command surfaces its CLI options via ``--help``; the function
 docstrings below mirror those summaries so pydoc reflects the same
 contract.
 """
+
 import json
 import os
 import subprocess
@@ -60,6 +61,7 @@ def _invalidate_supervised_cache(
     """Build the dispatched training task from CLI args and delete its cached outputs."""
     import importlib
     import sys
+
     cwd = os.getcwd()
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
@@ -89,6 +91,7 @@ def _invalidate_supervised_cache(
 
 def _get_results_dir():
     from mars_rec.utils.files import OUTPUT_PATH
+
     return os.path.join(OUTPUT_PATH, "models", "SupervisedModelTraining", "results")
 
 
@@ -111,6 +114,7 @@ def _load_run(run_dir):
     best_metrics = {}
     if os.path.exists(history_path):
         import pandas as pd
+
         history = pd.read_csv(history_path)
         if len(history) > 0:
             last = history.iloc[-1]
@@ -173,8 +177,18 @@ def run():
     pass
 
 
-@run.command(context_settings=dict(ignore_unknown_options=True,), add_help_option=False)
-@click.option("--no-cache", is_flag=True, default=False, help="Force re-execution of the entire pipeline, ignoring cached results.")
+@run.command(
+    context_settings=dict(
+        ignore_unknown_options=True,
+    ),
+    add_help_option=False,
+)
+@click.option(
+    "--no-cache",
+    is_flag=True,
+    default=False,
+    help="Force re-execution of the entire pipeline, ignoring cached results.",
+)
 @click.option(
     "--task-class",
     default="mars_rec.simulation.training.SupervisedModelTraining",
@@ -195,8 +209,7 @@ def supervised(no_cache: bool, task_class: str, args: Tuple[str]):
     """
     if "." not in task_class:
         raise click.BadParameter(
-            f"--task-class must be a fully-qualified Python path "
-            f"(`module.submodule.ClassName`), got {task_class!r}"
+            f"--task-class must be a fully-qualified Python path (`module.submodule.ClassName`), got {task_class!r}"
         )
     module_path, class_name = task_class.rsplit(".", 1)
     if no_cache:
@@ -204,7 +217,12 @@ def supervised(no_cache: bool, task_class: str, args: Tuple[str]):
     _run_luigi([module_path, class_name, *args])
 
 
-@run.command(context_settings=dict(ignore_unknown_options=True,), add_help_option=False)
+@run.command(
+    context_settings=dict(
+        ignore_unknown_options=True,
+    ),
+    add_help_option=False,
+)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def data(args: Tuple[str]):
     """Run an arbitrary Luigi data-preparation task by ``module Task``.
@@ -230,9 +248,7 @@ def list_runs(project, limit):
     runs = runs[:limit]
 
     # Table header
-    click.echo(
-        f"{'#':<4} {'Date':<18} {'Project':<40} {'Model':<40} {'Epochs':<8} {'Task ID'}"
-    )
+    click.echo(f"{'#':<4} {'Date':<18} {'Project':<40} {'Model':<40} {'Epochs':<8} {'Task ID'}")
     click.echo("-" * 160)
 
     for i, run in enumerate(runs, 1):
@@ -243,19 +259,23 @@ def list_runs(project, limit):
         epochs = run["best_metrics"].get("total_epochs", p.get("epochs", "?"))
         task_id = run["task_id"]
 
-        click.echo(
-            f"{i:<4} {date_str:<18} {project_name:<40} {model_name:<40} {epochs:<8} {task_id}"
-        )
+        click.echo(f"{i:<4} {date_str:<18} {project_name:<40} {model_name:<40} {epochs:<8} {task_id}")
 
     click.echo(f"\nTotal: {len(runs)} run(s)")
 
 
 @cli.command("results")
 @click.option("--project", default=None, help="Filter by project name (substring match).")
-@click.option("--metric", multiple=True, help="Metrics to display (e.g. --metric val_loss --metric val_binary_accuracy). Shows all if omitted.")
+@click.option(
+    "--metric",
+    multiple=True,
+    help="Metrics to display (e.g. --metric val_loss --metric val_binary_accuracy). Shows all if omitted.",
+)
 @click.option("--sort-by", default=None, help="Sort results by this metric (ascending).")
 @click.option("--limit", default=20, help="Max number of runs to show.")
-@click.option("--params", multiple=True, help="Extra params to display as columns (e.g. --params learning_rate --params epochs).")
+@click.option(
+    "--params", multiple=True, help="Extra params to display as columns (e.g. --params learning_rate --params epochs)."
+)
 def results(project, metric, sort_by, limit, params):
     """Compare results across training runs."""
     import pandas as pd
@@ -331,7 +351,9 @@ def results(project, metric, sort_by, limit, params):
 
 @cli.command("predict")
 @click.option("--model-dir", required=False, default=None, help="Full path to the model task directory.")
-@click.option("--task-id", required=False, default=None, help="Task ID (looks up inside the standard results directory).")
+@click.option(
+    "--task-id", required=False, default=None, help="Task ID (looks up inside the standard results directory)."
+)
 @click.option("--data", required=True, help="Path to input data file (parquet or CSV).")
 @click.option("--output", default="result.json", help="Output file path.")
 @click.option("--batch-size", default=128, type=int, help="Batch size for inference.")
@@ -370,17 +392,46 @@ def predict(model_dir, task_id, data, output, batch_size, top_k, device):
 
 @cli.command("evaluate")
 @click.option("--model-dir", required=False, default=None, help="Full path to the model task directory.")
-@click.option("--task-id", required=False, default=None, help="Task ID (looks up inside the standard results directory).")
-@click.option("--data", default=None, help="Path to external data file (CSV or parquet) for evaluation. Must contain the target column. If omitted, uses original training splits.")
-@click.option("--metric", multiple=True, help="Override validation metrics (e.g. --metric loss --metric f1_score --metric binary_accuracy). Uses original if omitted.")
-@click.option("--ranking-metrics/--no-ranking-metrics", default=None, help="Enable/disable ranking metrics (NDCG, HitRate, MRR, MAP).")
+@click.option(
+    "--task-id", required=False, default=None, help="Task ID (looks up inside the standard results directory)."
+)
+@click.option(
+    "--data",
+    default=None,
+    help="Path to external data file (CSV or parquet) for evaluation. Must contain the target column. If omitted, uses original training splits.",
+)
+@click.option(
+    "--metric",
+    multiple=True,
+    help="Override validation metrics (e.g. --metric loss --metric f1_score --metric binary_accuracy). Uses original if omitted.",
+)
+@click.option(
+    "--ranking-metrics/--no-ranking-metrics",
+    default=None,
+    help="Enable/disable ranking metrics (NDCG, HitRate, MRR, MAP).",
+)
 @click.option("--sample-size-eval", default=None, type=int, help="Override test-set sample size for evaluation.")
 @click.option("--batch-size", default=None, type=int, help="Override batch size for evaluation.")
 @click.option("--device", default=None, help="Override device (cpu, cuda, mps).")
-@click.option("--split", type=click.Choice(["val", "test", "all"]), default="all", help="Which split to evaluate: val, test, or all (default). Ignored when --data is provided.")
-@click.option("--output", default=None, help="Directory to save evaluation artifacts (plots, predictions, eval_results.json). Defaults to the model task directory.")
-@click.option("--prefilter/--no-prefilter", default=False, help="Apply the project's CandidateProvider (eligibility filter) when generating ranking-metrics candidates. Default off: ranking metrics are computed against the legacy random-sample candidate pool. Configs without a provider declared are unaffected.")
-def evaluate_cmd(model_dir, task_id, data, metric, ranking_metrics, sample_size_eval, batch_size, device, split, output, prefilter):
+@click.option(
+    "--split",
+    type=click.Choice(["val", "test", "all"]),
+    default="all",
+    help="Which split to evaluate: val, test, or all (default). Ignored when --data is provided.",
+)
+@click.option(
+    "--output",
+    default=None,
+    help="Directory to save evaluation artifacts (plots, predictions, eval_results.json). Defaults to the model task directory.",
+)
+@click.option(
+    "--prefilter/--no-prefilter",
+    default=False,
+    help="Apply the project's CandidateProvider (eligibility filter) when generating ranking-metrics candidates. Default off: ranking metrics are computed against the legacy random-sample candidate pool. Configs without a provider declared are unaffected.",
+)
+def evaluate_cmd(
+    model_dir, task_id, data, metric, ranking_metrics, sample_size_eval, batch_size, device, split, output, prefilter
+):
     """Re-run evaluation on training splits or on a new external dataset.
 
     \b
@@ -451,16 +502,22 @@ def evaluate_cmd(model_dir, task_id, data, metric, ranking_metrics, sample_size_
 
 
 @cli.command("visualize")
-@click.option("--model-dir", required=False, default=None,
-              help="Full path to the model task directory.")
-@click.option("--task-id", required=False, default=None,
-              help="Task ID (looks up inside the standard results directory).")
-@click.option("--mode", type=click.Choice(["svg", "summary"]), default="svg",
-              help="svg: writes architecture.svg (default).  summary: prints a text table.")
-@click.option("--output", "-o", default=None,
-              help="Output .svg path (svg mode only). Defaults to <task_dir>/architecture.svg.")
-@click.option("--trace/--no-trace", default=True,
-              help="Trace tensor shapes via a forward pass (slightly slower, more accurate).")
+@click.option("--model-dir", required=False, default=None, help="Full path to the model task directory.")
+@click.option(
+    "--task-id", required=False, default=None, help="Task ID (looks up inside the standard results directory)."
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["svg", "summary"]),
+    default="svg",
+    help="svg: writes architecture.svg (default).  summary: prints a text table.",
+)
+@click.option(
+    "--output", "-o", default=None, help="Output .svg path (svg mode only). Defaults to <task_dir>/architecture.svg."
+)
+@click.option(
+    "--trace/--no-trace", default=True, help="Trace tensor shapes via a forward pass (slightly slower, more accurate)."
+)
 @click.option("--device", default="cpu", help="Device for model instantiation.")
 def visualize(model_dir, task_id, mode, output, trace, device):
     """Generate the architecture diagram for a trained model.
@@ -496,7 +553,8 @@ def visualize(model_dir, task_id, mode, output, trace, device):
 
     click.echo(f"Loading model from: {model_dir}")
     model, project_config, index_mapping, params = load_model_from_task(
-        model_dir, device=device,
+        model_dir,
+        device=device,
     )
     model_cls = params.get("recommender_module_class", "?").split(".")[-1]
     click.echo(f"Model: {model_cls} | Input columns: {len(project_config.input_columns)}")
@@ -509,13 +567,15 @@ def visualize(model_dir, task_id, mode, output, trace, device):
         output = os.path.join(model_dir, "architecture.svg")
 
     rendered = generate_architecture_diagram(
-        model, project_config, params, output,
-        index_mapping=index_mapping, trace=trace, device=device,
+        model,
+        project_config,
+        params,
+        output,
+        index_mapping=index_mapping,
+        trace=trace,
+        device=device,
     )
-    click.echo(
-        f"SVG diagram saved to: {rendered}"
-        + ("  (with forward-pass shape trace)" if trace else "")
-    )
+    click.echo(f"SVG diagram saved to: {rendered}" + ("  (with forward-pass shape trace)" if trace else ""))
 
 
 if __name__ == "__main__":

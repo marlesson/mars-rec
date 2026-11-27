@@ -220,4 +220,3 @@ class TestParallelLiteralEval:
         series = pd.Series(["[[1, 2], [3, 4]]"])
         result = parallel_literal_eval(series, use_tqdm=False)
         assert result == [[[1, 2], [3, 4]]]
-

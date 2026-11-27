@@ -7,6 +7,7 @@ training task uses :func:`plot_history`, :func:`plot_scores`,
 :func:`plot_confusion_matrix` to write ``plot_history.jpg``,
 ``plot_scores.png`` etc. into the run's output directory.
 """
+
 from typing import Optional
 
 import matplotlib
@@ -24,14 +25,13 @@ from sklearn.metrics import (
     auc,
     precision_recall_curve,
     average_precision_score,
-    f1_score,
 )
 
 # Consistent style
 sns.set_theme(style="whitegrid", palette="muted", font_scale=1.05)
 _PALETTE = sns.color_palette("muted")
 _TRAIN_COLOR = _PALETTE[0]  # blue
-_VAL_COLOR = _PALETTE[3]    # red/coral
+_VAL_COLOR = _PALETTE[3]  # red/coral
 
 
 def plot_history(
@@ -49,13 +49,15 @@ def plot_history(
         extra_info: Dict of extra metadata to show (e.g. lr, batch_size).
     """
     metrics = [
-        col for col in history_df.columns
+        col
+        for col in history_df.columns
         if col != "epoch" and not col.startswith("val_") and not col.startswith("running_")
     ]
 
     n_metrics = len(metrics)
     fig, axes = plt.subplots(
-        1, n_metrics,
+        1,
+        n_metrics,
         figsize=(6 * n_metrics, 4.5),
         squeeze=False,
     )
@@ -67,16 +69,26 @@ def plot_history(
 
         # Train line
         ax.plot(
-            epochs, history_df[metric],
-            color=_TRAIN_COLOR, linewidth=2, label="Train", marker="o", markersize=3,
+            epochs,
+            history_df[metric],
+            color=_TRAIN_COLOR,
+            linewidth=2,
+            label="Train",
+            marker="o",
+            markersize=3,
         )
 
         # Validation line
         val_col = f"val_{metric}"
         if val_col in history_df.columns:
             ax.plot(
-                epochs, history_df[val_col],
-                color=_VAL_COLOR, linewidth=2, label="Validation", marker="s", markersize=3,
+                epochs,
+                history_df[val_col],
+                color=_VAL_COLOR,
+                linewidth=2,
+                label="Validation",
+                marker="s",
+                markersize=3,
             )
 
             # Annotate best validation value
@@ -158,8 +170,13 @@ def plot_scores(
 
     # Histogram + KDE
     sns.histplot(
-        scores, kde=True, stat="density",
-        color=_TRAIN_COLOR, edgecolor="white", linewidth=0.5, alpha=0.6,
+        scores,
+        kde=True,
+        stat="density",
+        color=_TRAIN_COLOR,
+        edgecolor="white",
+        linewidth=0.5,
+        alpha=0.6,
         ax=ax,
     )
 
@@ -181,9 +198,15 @@ def plot_scores(
     )
     props = dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor="lightgray", alpha=0.9)
     ax.text(
-        0.97, 0.95, stats_text, transform=ax.transAxes,
-        fontsize=9, verticalalignment="top", horizontalalignment="right",
-        bbox=props, family="monospace",
+        0.97,
+        0.95,
+        stats_text,
+        transform=ax.transAxes,
+        fontsize=9,
+        verticalalignment="top",
+        horizontalalignment="right",
+        bbox=props,
+        family="monospace",
     )
 
     # Formatting
@@ -262,9 +285,15 @@ def plot_confusion_matrix(
     cmap = LinearSegmentedColormap.from_list("custom", ["#FFFFFF", _TRAIN_COLOR], N=256)
 
     sns.heatmap(
-        cm, annot=False, fmt="d", cmap=cmap,
-        linewidths=1.5, linecolor="white",
-        square=True, cbar=False, ax=ax,
+        cm,
+        annot=False,
+        fmt="d",
+        cmap=cmap,
+        linewidths=1.5,
+        linecolor="white",
+        square=True,
+        cbar=False,
+        ax=ax,
     )
 
     # Annotate cells with count and percentage
@@ -274,12 +303,23 @@ def plot_confusion_matrix(
             pct = cm_norm[i, j] * 100
             text_color = "white" if pct > 55 else "black"
             ax.text(
-                j + 0.5, i + 0.38, f"{count}",
-                ha="center", va="center", fontsize=20, fontweight="bold", color=text_color,
+                j + 0.5,
+                i + 0.38,
+                f"{count}",
+                ha="center",
+                va="center",
+                fontsize=20,
+                fontweight="bold",
+                color=text_color,
             )
             ax.text(
-                j + 0.5, i + 0.65, f"({pct:.1f}%)",
-                ha="center", va="center", fontsize=10, color=text_color,
+                j + 0.5,
+                i + 0.65,
+                f"({pct:.1f}%)",
+                ha="center",
+                va="center",
+                fontsize=10,
+                color=text_color,
             )
 
     ax.set_xlabel("Predicted", fontsize=11, labelpad=8)
@@ -304,9 +344,15 @@ def plot_confusion_matrix(
     )
     props = dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor="lightgray", alpha=0.9)
     ax.text(
-        1.02, 0.5, metrics_text, transform=ax.transAxes,
-        fontsize=9, verticalalignment="center", horizontalalignment="left",
-        bbox=props, family="monospace",
+        1.02,
+        0.5,
+        metrics_text,
+        transform=ax.transAxes,
+        fontsize=9,
+        verticalalignment="center",
+        horizontalalignment="left",
+        bbox=props,
+        family="monospace",
     )
 
     # Title
@@ -350,7 +396,10 @@ def plot_roc_curve(
 
     # ROC curve
     ax.plot(
-        fpr, tpr, color=_TRAIN_COLOR, linewidth=2.5,
+        fpr,
+        tpr,
+        color=_TRAIN_COLOR,
+        linewidth=2.5,
         label=f"ROC Curve (AUC = {roc_auc:.4f})",
     )
 
@@ -369,11 +418,12 @@ def plot_roc_curve(
 
     ax.plot(best_fpr, best_tpr, "o", color=_VAL_COLOR, markersize=10, zorder=5)
     ax.annotate(
-        f"Best threshold: {best_threshold:.3f}\n"
-        f"TPR: {best_tpr:.3f}, FPR: {best_fpr:.3f}",
+        f"Best threshold: {best_threshold:.3f}\nTPR: {best_tpr:.3f}, FPR: {best_fpr:.3f}",
         xy=(best_fpr, best_tpr),
         xytext=(best_fpr + 0.15, best_tpr - 0.15),
-        fontsize=9, color=_VAL_COLOR, fontweight="bold",
+        fontsize=9,
+        color=_VAL_COLOR,
+        fontweight="bold",
         arrowprops=dict(arrowstyle="->", color=_VAL_COLOR, lw=1.2),
         bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="lightgray", alpha=0.9),
     )
@@ -391,9 +441,15 @@ def plot_roc_curve(
     # AUC box
     auc_text = f"AUC = {roc_auc:.4f}"
     ax.text(
-        0.97, 0.03, auc_text, transform=ax.transAxes,
-        fontsize=14, fontweight="bold", color=_TRAIN_COLOR,
-        ha="right", va="bottom",
+        0.97,
+        0.03,
+        auc_text,
+        transform=ax.transAxes,
+        fontsize=14,
+        fontweight="bold",
+        color=_TRAIN_COLOR,
+        ha="right",
+        va="bottom",
     )
 
     # Title
@@ -440,7 +496,10 @@ def plot_precision_recall_curve(
 
     # PR curve
     ax.plot(
-        recall, precision, color=_TRAIN_COLOR, linewidth=2.5,
+        recall,
+        precision,
+        color=_TRAIN_COLOR,
+        linewidth=2.5,
         label=f"PR Curve (AP = {ap:.4f})",
     )
 
@@ -460,12 +519,12 @@ def plot_precision_recall_curve(
 
     ax.plot(best_recall, best_precision, "o", color=_VAL_COLOR, markersize=10, zorder=5)
     ax.annotate(
-        f"Best F1: {best_f1:.3f}\n"
-        f"Threshold: {best_threshold:.3f}\n"
-        f"P: {best_precision:.3f}, R: {best_recall:.3f}",
+        f"Best F1: {best_f1:.3f}\nThreshold: {best_threshold:.3f}\nP: {best_precision:.3f}, R: {best_recall:.3f}",
         xy=(best_recall, best_precision),
         xytext=(best_recall - 0.25, best_precision - 0.18),
-        fontsize=9, color=_VAL_COLOR, fontweight="bold",
+        fontsize=9,
+        color=_VAL_COLOR,
+        fontweight="bold",
         arrowprops=dict(arrowstyle="->", color=_VAL_COLOR, lw=1.2),
         bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="lightgray", alpha=0.9),
     )
@@ -481,9 +540,15 @@ def plot_precision_recall_curve(
 
     # AP box
     ax.text(
-        0.03, 0.03, f"AP = {ap:.4f}", transform=ax.transAxes,
-        fontsize=14, fontweight="bold", color=_TRAIN_COLOR,
-        ha="left", va="bottom",
+        0.03,
+        0.03,
+        f"AP = {ap:.4f}",
+        transform=ax.transAxes,
+        fontsize=14,
+        fontweight="bold",
+        color=_TRAIN_COLOR,
+        ha="left",
+        va="bottom",
     )
 
     # Title

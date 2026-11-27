@@ -6,6 +6,7 @@ Usage:
     cd <project-root>
     PYTHONPATH=src:. python examples/lastfm/run_training.py
 """
+
 import os
 import sys
 

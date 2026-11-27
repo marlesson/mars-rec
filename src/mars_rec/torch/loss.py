@@ -7,12 +7,12 @@ can be selected via the ``loss_function`` Luigi parameter
 ``lambdarank``, ``bce_logits_smooth``, ``infonce``,
 ``cosine_similarity``, ``hardneg_infonce``, ``dummy``).
 """
+
 from typing import List
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from torch.nn.modules.loss import _Loss
 
 
@@ -74,29 +74,18 @@ class ImplicitFeedbackBCELoss(nn.Module):
     Feedback Datasets".
     """
 
-    def __init__(
-        self, confidence_weights: List[float], weight=None, reduction="mean"
-    ) -> None:
+    def __init__(self, confidence_weights: List[float], weight=None, reduction="mean") -> None:
         super().__init__()
         self.confidence_weights = confidence_weights
         self.weight = weight
         self.reduction = reduction
 
-    def forward(
-        self,
-        input: torch.Tensor,
-        target: torch.Tensor,
-        *confidence_targets: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, target: torch.Tensor, *confidence_targets: torch.Tensor) -> torch.Tensor:
         assert len(self.confidence_weights) == len(confidence_targets)
         confidence = torch.ones_like(target)
-        for confidence_target, confidence_weight in zip(
-            confidence_targets, self.confidence_weights
-        ):
+        for confidence_target, confidence_weight in zip(confidence_targets, self.confidence_weights):
             confidence += confidence_weight * confidence_target
-        loss = confidence * F.binary_cross_entropy(
-            input, target, weight=self.weight, reduction="none"
-        )
+        loss = confidence * F.binary_cross_entropy(input, target, weight=self.weight, reduction="none")
         if self.reduction == "mean":
             return loss.mean()
         elif self.reduction == "sum":
@@ -247,10 +236,10 @@ class BPRLoss(nn.Module):
         if n_pos == 0 or n_neg == 0:
             # Single-label batch — use BCE so val_loss stays meaningful.
             return self._bce_fallback(scores, target)
-        pos_scores = scores[pos_mask]                                  # [n_pos]
-        neg_scores = scores[~pos_mask]                                 # [n_neg]
+        pos_scores = scores[pos_mask]  # [n_pos]
+        neg_scores = scores[~pos_mask]  # [n_neg]
         idx = torch.randint(0, n_neg, (n_pos,), device=scores.device)
-        sampled_neg = neg_scores[idx]                                  # [n_pos]
+        sampled_neg = neg_scores[idx]  # [n_pos]
         loss_per = -F.logsigmoid(pos_scores - sampled_neg)
         if self.reduction == "mean":
             return loss_per.mean()
@@ -306,9 +295,9 @@ class RankNetLoss(nn.Module):
         n_neg = int((~pos_mask).sum().item())
         if n_pos == 0 or n_neg == 0:
             return self._bce_fallback(scores, target)
-        s_pos = scores[pos_mask]                                # [n_pos]
-        s_neg = scores[~pos_mask]                               # [n_neg]
-        diff = s_pos.unsqueeze(1) - s_neg.unsqueeze(0)          # [n_pos, n_neg]
+        s_pos = scores[pos_mask]  # [n_pos]
+        s_neg = scores[~pos_mask]  # [n_neg]
+        diff = s_pos.unsqueeze(1) - s_neg.unsqueeze(0)  # [n_pos, n_neg]
         loss_per_pair = -F.logsigmoid(self.sigma * diff)
         if self.reduction == "mean":
             return loss_per_pair.mean()
@@ -361,8 +350,8 @@ class LambdaRankLoss(nn.Module):
         n_neg = int((~pos_mask).sum().item())
         if n_pos == 0 or n_neg == 0:
             return self._bce_fallback(scores, target)
-        s_pos = scores[pos_mask]                                # [n_pos]
-        s_neg = scores[~pos_mask]                               # [n_neg]
+        s_pos = scores[pos_mask]  # [n_pos]
+        s_neg = scores[~pos_mask]  # [n_neg]
 
         with torch.no_grad():
             B = scores.numel()
@@ -370,15 +359,18 @@ class LambdaRankLoss(nn.Module):
             ranks = torch.empty_like(sorted_idx)
             ranks[sorted_idx] = torch.arange(1, B + 1, device=scores.device)
             ranks_f = ranks.float()
-            dcg_pos = 1.0 / torch.log2(ranks_f[pos_mask] + 1.0)         # [n_pos]
-            dcg_neg = 1.0 / torch.log2(ranks_f[~pos_mask] + 1.0)        # [n_neg]
+            dcg_pos = 1.0 / torch.log2(ranks_f[pos_mask] + 1.0)  # [n_pos]
+            dcg_neg = 1.0 / torch.log2(ranks_f[~pos_mask] + 1.0)  # [n_neg]
             ideal = torch.arange(
-                1, n_pos + 1, dtype=torch.float, device=scores.device,
+                1,
+                n_pos + 1,
+                dtype=torch.float,
+                device=scores.device,
             )
             idcg = (1.0 / torch.log2(ideal + 1.0)).sum().clamp(min=1e-9)
             delta_ndcg = (dcg_pos.unsqueeze(1) - dcg_neg.unsqueeze(0)).abs() / idcg
 
-        diff = s_pos.unsqueeze(1) - s_neg.unsqueeze(0)          # [n_pos, n_neg]
+        diff = s_pos.unsqueeze(1) - s_neg.unsqueeze(0)  # [n_pos, n_neg]
         loss_per_pair = -delta_ndcg * F.logsigmoid(self.sigma * diff)
         if self.reduction == "mean":
             return loss_per_pair.mean()
@@ -407,13 +399,9 @@ class BCEWithLogitsLossSmooth(nn.Module):
     ) -> None:
         super().__init__()
         if not 0.0 <= label_smoothing < 1.0:
-            raise ValueError(
-                f"label_smoothing must be in [0, 1), got {label_smoothing}"
-            )
+            raise ValueError(f"label_smoothing must be in [0, 1), got {label_smoothing}")
         self.label_smoothing = label_smoothing
-        self._bce = nn.BCEWithLogitsLoss(
-            weight=weight, pos_weight=pos_weight, reduction=reduction
-        )
+        self._bce = nn.BCEWithLogitsLoss(weight=weight, pos_weight=pos_weight, reduction=reduction)
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         a = self.label_smoothing

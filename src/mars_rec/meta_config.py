@@ -14,8 +14,9 @@ the column dtype and the high-level recommender flavour).
 
 See ``examples/movielens/config.py`` for the canonical minimal example.
 """
+
 from enum import Enum, auto
-from typing import Any, Callable, List, Type, Dict, Optional, TYPE_CHECKING
+from typing import Callable, List, Type, Dict, Optional, TYPE_CHECKING
 
 from torch.utils.data import Dataset
 import numpy as np
@@ -194,9 +195,7 @@ class ProjectConfig(object):
         metadata_columns: List[Column] = None,
         auxiliar_output_columns: List[Column] = None,
         possible_negative_indices_columns: Dict[str, List[str]] = None,
-        candidate_provider_factory: Optional[
-            Callable[..., "CandidateProvider"]
-        ] = None,
+        candidate_provider_factory: Optional[Callable[..., "CandidateProvider"]] = None,
         sample_keys_columns: Optional[List[str]] = None,
     ) -> None:
         self.base_dir = base_dir
@@ -270,7 +269,7 @@ class ProjectConfig(object):
             *self.other_input_columns,
             *self.auxiliar_output_columns,
             *self.metadata_columns,
-            self.output_column
+            self.output_column,
         ]
 
     def get_column_by_name(self, name: str) -> Optional[Column]:

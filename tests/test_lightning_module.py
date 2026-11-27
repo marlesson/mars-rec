@@ -7,6 +7,7 @@ Covers the Lightning-side contract that wraps a ``nn.Module`` and routes:
 - optimizer + scheduler config wiring,
 - EmbeddingRecommenderLightningModule's hard-negative pass-through.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -22,6 +23,7 @@ from mars_rec.torch.lightning_module import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _IdentityModule(nn.Module):
     """Returns the first input verbatim — used to inspect shared_step inputs."""
@@ -60,14 +62,18 @@ class _EmbModule(nn.Module):
 # Tests — RecommenderLightningModule
 # ---------------------------------------------------------------------------
 
+
 class TestSharedStep:
     def test_shared_step_returns_scalar_loss(self):
         module = _IdentityModule()
         loss_fn = nn.MSELoss()
         opt = torch.optim.SGD(module.parameters(), lr=0.01)
         lit = RecommenderLightningModule(
-            module=module, optimizer=opt, loss_fn=loss_fn,
-            metric_names=["mse"], loss_name="mse",
+            module=module,
+            optimizer=opt,
+            loss_fn=loss_fn,
+            metric_names=["mse"],
+            loss_name="mse",
         )
         # batch = (inputs, targets) — both [B] float for MSE
         inputs = torch.tensor([1.0, 2.0, 3.0])
@@ -82,8 +88,11 @@ class TestSharedStep:
         loss_fn = nn.MSELoss()
         opt = torch.optim.SGD(module.parameters(), lr=0.01)
         lit = RecommenderLightningModule(
-            module=module, optimizer=opt, loss_fn=loss_fn,
-            metric_names=[], loss_name="mse",
+            module=module,
+            optimizer=opt,
+            loss_fn=loss_fn,
+            metric_names=[],
+            loss_name="mse",
         )
         a = torch.tensor([1.0, 2.0])
         b = torch.tensor([5.0, 6.0])
@@ -106,17 +115,22 @@ class TestSharedStep:
 
         # Spy: capture preds the metric receives.
         captured = {}
+
         def fake_metric(preds, targets):
             captured["preds"] = preds.clone()
             return torch.tensor(0.5)
 
         # Patch METRIC_REGISTRY to expose our spy under a real-looking name.
         from mars_rec.torch import lightning_module as lm
+
         lm.METRIC_REGISTRY["__spy__"] = fake_metric
         try:
             lit = RecommenderLightningModule(
-                module=module, optimizer=opt, loss_fn=loss_fn,
-                metric_names=["__spy__"], loss_name="bce_logits",
+                module=module,
+                optimizer=opt,
+                loss_fn=loss_fn,
+                metric_names=["__spy__"],
+                loss_name="bce_logits",
             )
             # Manual logits well outside [0, 1]:
             inputs = torch.tensor([10.0, -10.0, 0.0])
@@ -137,15 +151,21 @@ class TestSharedStep:
         loss_fn = nn.MSELoss()
         opt = torch.optim.SGD(module.parameters(), lr=0.01)
         captured = {}
+
         def fake_metric(preds, targets):
             captured["preds"] = preds.clone()
             return torch.tensor(0.0)
+
         from mars_rec.torch import lightning_module as lm
+
         lm.METRIC_REGISTRY["__spy2__"] = fake_metric
         try:
             lit = RecommenderLightningModule(
-                module=module, optimizer=opt, loss_fn=loss_fn,
-                metric_names=["__spy2__"], loss_name="mse",  # not in _LOGIT_LOSSES
+                module=module,
+                optimizer=opt,
+                loss_fn=loss_fn,
+                metric_names=["__spy2__"],
+                loss_name="mse",  # not in _LOGIT_LOSSES
             )
             lit.log = lambda *a, **kw: None
             inputs = torch.tensor([7.0, -3.0])
@@ -162,8 +182,11 @@ class TestConfigureOptimizers:
         module = _IdentityModule()
         opt = torch.optim.SGD(module.parameters(), lr=0.01)
         lit = RecommenderLightningModule(
-            module=module, optimizer=opt, loss_fn=nn.MSELoss(),
-            metric_names=[], loss_name="mse",
+            module=module,
+            optimizer=opt,
+            loss_fn=nn.MSELoss(),
+            metric_names=[],
+            loss_name="mse",
         )
         out = lit.configure_optimizers()
         assert out is opt
@@ -174,8 +197,11 @@ class TestConfigureOptimizers:
         sched = torch.optim.lr_scheduler.StepLR(opt, step_size=10)
         scheduler_cfg = {"scheduler": sched, "interval": "epoch"}
         lit = RecommenderLightningModule(
-            module=module, optimizer=opt, loss_fn=nn.MSELoss(),
-            metric_names=[], loss_name="mse",
+            module=module,
+            optimizer=opt,
+            loss_fn=nn.MSELoss(),
+            metric_names=[],
+            loss_name="mse",
             lr_scheduler_config=scheduler_cfg,
         )
         out = lit.configure_optimizers()
@@ -188,6 +214,7 @@ class TestConfigureOptimizers:
 # Tests — EmbeddingRecommenderLightningModule (hard negatives)
 # ---------------------------------------------------------------------------
 
+
 class TestEmbeddingLightningModule:
     def test_passes_hard_negs_when_loss_accepts_three_args(self):
         """If the module exposes ``hard_neg_indices`` and the loss accepts a
@@ -198,16 +225,17 @@ class TestEmbeddingLightningModule:
         received = {}
 
         def loss_fn(pred, target, hard_neg=None):
-            received["hard_neg_shape"] = (
-                None if hard_neg is None else tuple(hard_neg.shape)
-            )
+            received["hard_neg_shape"] = None if hard_neg is None else tuple(hard_neg.shape)
             # any scalar loss for backward; cosine sim is fine
             return (pred * target).sum()
 
         opt = torch.optim.SGD(module.parameters(), lr=0.01)
         lit = EmbeddingRecommenderLightningModule(
-            module=module, optimizer=opt, loss_fn=loss_fn,
-            metric_names=[], loss_name="infonce",
+            module=module,
+            optimizer=opt,
+            loss_fn=loss_fn,
+            metric_names=[],
+            loss_name="infonce",
         )
         lit.log = lambda *a, **kw: None
         # batch: (inputs, track_ids)
@@ -230,8 +258,11 @@ class TestEmbeddingLightningModule:
 
         opt = torch.optim.SGD(module.parameters(), lr=0.01)
         lit = EmbeddingRecommenderLightningModule(
-            module=module, optimizer=opt, loss_fn=loss_fn,
-            metric_names=[], loss_name="infonce",
+            module=module,
+            optimizer=opt,
+            loss_fn=loss_fn,
+            metric_names=[],
+            loss_name="infonce",
         )
         lit.log = lambda *a, **kw: None
         track_ids = torch.tensor([1, 2])

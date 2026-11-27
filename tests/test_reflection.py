@@ -5,6 +5,7 @@ to a class (project configs, recommender modules, loss functions, etc).
 Wrong-type errors must surface at load time — not after the trainer is
 half built.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -18,13 +19,15 @@ from mars_rec.utils.reflection import get_attribute_names, load_attr
 class TestLoadAttr:
     def test_loads_class_via_dotted_path(self):
         loaded = load_attr(
-            "mars_rec.model.base_model.LogisticRegression", RecommenderModule,
+            "mars_rec.model.base_model.LogisticRegression",
+            RecommenderModule,
         )
         assert loaded is LogisticRegression
 
     def test_loads_class_when_expected_type_is_torch_module(self):
         loaded = load_attr(
-            "mars_rec.model.base_model.LogisticRegression", nn.Module,
+            "mars_rec.model.base_model.LogisticRegression",
+            nn.Module,
         )
         assert loaded is LogisticRegression
 
@@ -57,7 +60,8 @@ class TestLoadAttr:
         from mars_rec.meta_config import Column, IOType, ProjectConfig
 
         cls = load_attr(
-            "mars_rec.model.base_model.LogisticRegression", RecommenderModule,
+            "mars_rec.model.base_model.LogisticRegression",
+            RecommenderModule,
         )
         cfg = ProjectConfig(
             base_dir="/tmp/x",

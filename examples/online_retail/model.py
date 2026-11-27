@@ -10,9 +10,9 @@ the Last.fm sample: same recipe (shared item emb + sequence encoder +
 dot-product score) but with recurrence instead of self-attention, and with
 the user_column bound to an ephemeral session id.
 """
+
 from typing import Any, Dict
 
-import torch
 import torch.nn as nn
 
 from mars_rec.meta_config import ProjectConfig
@@ -33,7 +33,9 @@ class OnlineRetailGRU4Rec(RecommenderModule):
         super().__init__(project_config, index_mapping)
 
         self.item_emb = nn.Embedding(
-            self._n_items, n_factors, padding_idx=PAD_INDEX,
+            self._n_items,
+            n_factors,
+            padding_idx=PAD_INDEX,
         )
         self.gru = nn.GRU(
             input_size=n_factors,
@@ -41,11 +43,7 @@ class OnlineRetailGRU4Rec(RecommenderModule):
             batch_first=True,
         )
         self.dropout = nn.Dropout(dropout)
-        self.proj = (
-            nn.Linear(hidden_size, n_factors)
-            if hidden_size != n_factors
-            else nn.Identity()
-        )
+        self.proj = nn.Linear(hidden_size, n_factors) if hidden_size != n_factors else nn.Identity()
 
     def forward(self, *args):
         # args order from ProjectConfig.input_columns:
@@ -61,7 +59,7 @@ class OnlineRetailGRU4Rec(RecommenderModule):
         # histories.
         h_seq = self.item_emb(history_ids)
         h_seq = self.dropout(h_seq)
-        out, _ = self.gru(h_seq)         # (B, L, H)
+        out, _ = self.gru(h_seq)  # (B, L, H)
         h_session = self.proj(out[:, -1, :])  # (B, d)
 
         target_vec = self.item_emb(target_ids)  # (B, d)

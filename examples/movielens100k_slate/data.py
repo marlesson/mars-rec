@@ -16,6 +16,7 @@ at grouplens.org. The slate-ranking lesson is identical.
 This example is deliberately distinct from ``examples/movielens`` (which
 uses MovieLens 1M with a different ``dataset_class``).
 """
+
 import os
 import zipfile
 from typing import Optional
@@ -32,17 +33,37 @@ DATASET_DIR: str = os.path.join(BASE_DIR, "dataset")
 
 ML100K_URL = "https://files.grouplens.org/datasets/movielens/ml-100k.zip"
 
-SLATE_SIZE: int = 50          # 1 positive + (SLATE_SIZE - 1) random items
-GENRE_DIM: int = 19           # ML-100K has 19 binary genre flags
+SLATE_SIZE: int = 50  # 1 positive + (SLATE_SIZE - 1) random items
+GENRE_DIM: int = 19  # ML-100K has 19 binary genre flags
 
 METADATA_PATH = os.path.join(DATASET_DIR, "ml100k_item_metadata.csv")
 
 # ML-100K item file column layout (from u.info / README)
 _ML100K_ITEM_COLS = [
-    "item_id", "title", "release_date", "video_release_date", "url",
-    "unknown", "action", "adventure", "animation", "children", "comedy",
-    "crime", "documentary", "drama", "fantasy", "film_noir", "horror",
-    "musical", "mystery", "romance", "sci_fi", "thriller", "war", "western",
+    "item_id",
+    "title",
+    "release_date",
+    "video_release_date",
+    "url",
+    "unknown",
+    "action",
+    "adventure",
+    "animation",
+    "children",
+    "comedy",
+    "crime",
+    "documentary",
+    "drama",
+    "fantasy",
+    "film_noir",
+    "horror",
+    "musical",
+    "mystery",
+    "romance",
+    "sci_fi",
+    "thriller",
+    "war",
+    "western",
 ]
 _GENRE_COLS = _ML100K_ITEM_COLS[5:]  # 19 binary flags
 
@@ -98,9 +119,7 @@ class DownloadAndPrepareML100KSlate(luigi.Task):
         # Item metadata: 19-dim binary genre vector per movie, stored as a
         # FLOAT_ARRAY in a separate per-item CSV (looked up at sample time).
         genre_matrix = items[_GENRE_COLS].astype(np.float32).values
-        items["item_genre_vec"] = [
-            "[" + ", ".join(f"{x:.1f}" for x in row) + "]" for row in genre_matrix
-        ]
+        items["item_genre_vec"] = ["[" + ", ".join(f"{x:.1f}" for x in row) + "]" for row in genre_matrix]
         items[["item_id", "item_genre_vec"]].to_csv(METADATA_PATH, index=False)
 
         # Build per-row slate. For each rating, slate = [positive item] +
@@ -137,14 +156,13 @@ class DownloadAndPrepareML100KSlate(luigi.Task):
             lambda lst: "[" + ", ".join(str(int(v)) for v in lst) + "]"
         )
 
-        out = ratings[
-            ["user_id", "item_id", "rating", "timestamp", "available_items", "label"]
-        ].sort_values("timestamp").reset_index(drop=True)
-        out.to_csv(self.output()[0].path, index=False)
-        print(
-            f"Wrote {len(out)} interactions with slate size {SLATE_SIZE} "
-            f"and {len(items)} item-metadata rows."
+        out = (
+            ratings[["user_id", "item_id", "rating", "timestamp", "available_items", "label"]]
+            .sort_values("timestamp")
+            .reset_index(drop=True)
         )
+        out.to_csv(self.output()[0].path, index=False)
+        print(f"Wrote {len(out)} interactions with slate size {SLATE_SIZE} and {len(items)} item-metadata rows.")
 
 
 class PrepareML100KSlateDataFrame(BasePrepareDataFrames):

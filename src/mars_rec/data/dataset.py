@@ -23,6 +23,7 @@ Each ``__getitem__`` returns ``(inputs, output)`` where ``inputs`` is a
 tuple of numpy arrays whose order matches
 :attr:`ProjectConfig.input_columns`.
 """
+
 from typing import Callable, Tuple, List, Union, Optional, Dict, Any
 
 import functools
@@ -35,8 +36,7 @@ from torch.utils.data import Dataset
 
 from mars_rec.meta_config import ProjectConfig, IOType, Column
 from mars_rec.utils.index_mapping import map_array
-from mars_rec.utils.utils import parallel_literal_eval, reduce_df_mem
-import gc
+from mars_rec.utils.utils import parallel_literal_eval
 from multiprocessing.pool import Pool
 import os
 
@@ -46,12 +46,8 @@ logger = logging.getLogger(__name__)
 def _concat_outputs(positive_output, negative_output):
     """Concatenate positive and negative outputs, handling tuple (aux) outputs."""
     if isinstance(positive_output, tuple):
-        neg_zeros = [negative_output] + [
-            np.zeros_like(negative_output) for _ in range(len(positive_output) - 1)
-        ]
-        return tuple(
-            np.concatenate([p, n]) for p, n in zip(positive_output, neg_zeros)
-        )
+        neg_zeros = [negative_output] + [np.zeros_like(negative_output) for _ in range(len(positive_output) - 1)]
+        return tuple(np.concatenate([p, n]) for p, n in zip(positive_output, neg_zeros))
     return np.concatenate([positive_output, negative_output])
 
 
@@ -66,16 +62,13 @@ def literal_eval_array_columns(data_frame: pd.DataFrame, columns: List[Column], 
     """
     for column in columns:
         if (
-            column.type
-            in (IOType.FLOAT_ARRAY, IOType.INT_ARRAY, IOType.INDEXABLE_ARRAY, IOType.SEQUENCE)
+            column.type in (IOType.FLOAT_ARRAY, IOType.INT_ARRAY, IOType.INDEXABLE_ARRAY, IOType.SEQUENCE)
             and column.name in data_frame
         ):
             data_frame[column.name] = parallel_literal_eval(data_frame[column.name], pool=pool)
 
 
-def preprocess_interactions_data_frame(
-    data_frame: pd.DataFrame, project_config: ProjectConfig
-):
+def preprocess_interactions_data_frame(data_frame: pd.DataFrame, project_config: ProjectConfig):
     """Normalise the interactions DataFrame before it enters a Dataset.
 
     Casts the user / item columns to strings (so they round-trip
@@ -156,13 +149,9 @@ def preprocess_metadata_data_frame(
         metadata_data_frame[project_config.item_column.name] != 0
     ]  # Remove unknown
 
-    metadata_data_frame = metadata_data_frame.set_index(
-        project_config.item_column.name, drop=False
-    ).sort_index()
+    metadata_data_frame = metadata_data_frame.set_index(project_config.item_column.name, drop=False).sort_index()
 
-    if not (
-        np.arange(NON_UTIL_UID, len(metadata_data_frame.index) + NON_UTIL_UID) == metadata_data_frame.index
-    ).all():
+    if not (np.arange(NON_UTIL_UID, len(metadata_data_frame.index) + NON_UTIL_UID) == metadata_data_frame.index).all():
         raise ValueError("The item index is not contiguous")
 
     embeddings_for_metadata: Dict[str, np.ndarray] = {}
@@ -248,7 +237,7 @@ class InteractionsDataset(Dataset):
         project_config: ProjectConfig,
         index_mapping: Dict[str, Dict[Any, int]],
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
         # Pop the per-candidate feature lookup *before* it can leak into a
         # subclass kwargs forward (e.g. the popularity sampler accepts its
@@ -259,9 +248,7 @@ class InteractionsDataset(Dataset):
         #   - 1-arg callable: (index_mapping) -> dict
         # ``None`` (default) makes the override a no-op — backward-compat
         # with every config that does not declare candidate-derived inputs.
-        self._candidate_feature_lookup_raw = kwargs.pop(
-            "candidate_feature_lookup", None
-        )
+        self._candidate_feature_lookup_raw = kwargs.pop("candidate_feature_lookup", None)
         self._candidate_feature_lookup: Optional[Dict[str, Any]] = None
 
         self._project_config = project_config
@@ -270,25 +257,18 @@ class InteractionsDataset(Dataset):
         input_column_names = [input_column.name for input_column in self._input_columns]
 
         # Pre-resolve column→tuple-position so the override is O(1) per call.
-        self._input_col_index_by_name: Dict[str, int] = {
-            col.name: i for i, col in enumerate(self._input_columns)
-        }
+        self._input_col_index_by_name: Dict[str, int] = {col.name: i for i, col in enumerate(self._input_columns)}
 
         if project_config.item_is_input:
-            self._item_input_index = self._input_columns.index(
-                project_config.item_column
-            )
+            self._item_input_index = self._input_columns.index(project_config.item_column)
 
         auxiliar_output_column_names = [
-            auxiliar_output_column.name
-            for auxiliar_output_column in project_config.auxiliar_output_columns
+            auxiliar_output_column.name for auxiliar_output_column in project_config.auxiliar_output_columns
         ]
         self._data_frame = data_frame[
             list(
                 set(
-                    input_column_names
-                    + [project_config.output_column.name]
-                    + auxiliar_output_column_names
+                    input_column_names + [project_config.output_column.name] + auxiliar_output_column_names
                 ).intersection(data_frame.columns)
             )
         ]
@@ -303,16 +283,22 @@ class InteractionsDataset(Dataset):
         for col in self._input_columns:
             if col.name in self._data_frame.columns:
                 self._packed_inputs[col.name] = self._convert_dtype(
-                    self._data_frame[col.name].values, col.type,
+                    self._data_frame[col.name].values,
+                    col.type,
                 )
         out_col = project_config.output_column
         self._packed_output: np.ndarray = self._convert_dtype(
-            self._data_frame[out_col.name].values, out_col.type,
+            self._data_frame[out_col.name].values,
+            out_col.type,
         )
         self._packed_aux_outputs: List[Tuple[Column, np.ndarray]] = [
-            (col, self._convert_dtype(
-                self._data_frame[col.name].values, col.type,
-            ))
+            (
+                col,
+                self._convert_dtype(
+                    self._data_frame[col.name].values,
+                    col.type,
+                ),
+            )
             for col in project_config.auxiliar_output_columns
             if col.name in self._data_frame.columns
         ]
@@ -337,27 +323,26 @@ class InteractionsDataset(Dataset):
             self._candidate_feature_lookup = raw
             return raw
         if not callable(raw):
-            raise TypeError(
-                f"candidate_feature_lookup must be a dict or callable, "
-                f"got {type(raw).__name__}"
-            )
+            raise TypeError(f"candidate_feature_lookup must be a dict or callable, got {type(raw).__name__}")
         try:
             sig = inspect.signature(raw)
-            arity = len([
-                p for p in sig.parameters.values()
-                if p.kind in (
-                    inspect.Parameter.POSITIONAL_ONLY,
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                ) and p.default is inspect.Parameter.empty
-            ])
+            arity = len(
+                [
+                    p
+                    for p in sig.parameters.values()
+                    if p.kind
+                    in (
+                        inspect.Parameter.POSITIONAL_ONLY,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    )
+                    and p.default is inspect.Parameter.empty
+                ]
+            )
         except (TypeError, ValueError):
             arity = 0
         materialised = raw(self._index_mapping) if arity >= 1 else raw()
         if not isinstance(materialised, dict):
-            raise TypeError(
-                f"candidate_feature_lookup callable must return a dict, "
-                f"got {type(materialised).__name__}"
-            )
+            raise TypeError(f"candidate_feature_lookup callable must return a dict, got {type(materialised).__name__}")
         self._candidate_feature_lookup = materialised
         return materialised
 
@@ -404,24 +389,26 @@ class InteractionsDataset(Dataset):
                 continue
             if col == "tag_ids":
                 tag_lut = lookup["tag_ids"]
-                _set(col, np.asarray(
-                    [tag_lut[i] for i in neg_arr], dtype=np.int64,
-                ))
+                _set(
+                    col,
+                    np.asarray(
+                        [tag_lut[i] for i in neg_arr],
+                        dtype=np.int64,
+                    ),
+                )
             else:
                 _set(col, np.asarray(lookup[col][neg_arr]))
 
         # Computed: artist_repeat_count = how many times the candidate's
         # artist appears in the row's prev_artist_ids
-        if (
-            "artist_repeat_count" in col_idx
-            and "prev_artist_ids" in col_idx
-            and "_artist_per_idx" in lookup
-        ):
+        if "artist_repeat_count" in col_idx and "prev_artist_ids" in col_idx and "_artist_per_idx" in lookup:
             cand_artists = np.asarray(
-                lookup["_artist_per_idx"][neg_arr], dtype=np.int64,
+                lookup["_artist_per_idx"][neg_arr],
+                dtype=np.int64,
             )  # [B]
             prev_artists = np.asarray(
-                input_list[col_idx["prev_artist_ids"]], dtype=np.int64,
+                input_list[col_idx["prev_artist_ids"]],
+                dtype=np.int64,
             )  # [B, L]
             pad_artist = lookup.get("_pad_artist", 0)
             valid = (cand_artists > 0) & (cand_artists != pad_artist)
@@ -440,7 +427,8 @@ class InteractionsDataset(Dataset):
             and "_release_year_int_per_idx" in lookup
         ):
             cand_release_year = np.asarray(
-                lookup["_release_year_int_per_idx"][neg_arr], dtype=np.int64,
+                lookup["_release_year_int_per_idx"][neg_arr],
+                dtype=np.int64,
             )
             year_norm = np.asarray(
                 input_list[col_idx["year_minus_2010_normalized"]],
@@ -458,14 +446,11 @@ class InteractionsDataset(Dataset):
         # across the row's previously-played tracks' tag sets. Uses tag_ids
         # lookup (which has tags per track idx, since track ids are indexed
         # by the framework). Padding tag idx 0 is excluded from set ops.
-        if (
-            "target_tag_overlap_count" in col_idx
-            and "prev_track_ids" in col_idx
-            and "tag_ids" in lookup
-        ):
+        if "target_tag_overlap_count" in col_idx and "prev_track_ids" in col_idx and "tag_ids" in lookup:
             tag_lut = lookup["tag_ids"]  # List[List[int]] indexed by track idx
             prev_tracks = np.asarray(
-                input_list[col_idx["prev_track_ids"]], dtype=np.int64,
+                input_list[col_idx["prev_track_ids"]],
+                dtype=np.int64,
             )  # [B, L]
             B = prev_tracks.shape[0]
             overlap = np.zeros(B, dtype=np.int64)
@@ -475,9 +460,7 @@ class InteractionsDataset(Dataset):
                 for pi in prev_tracks[b]:
                     pi_int = int(pi)
                     if pi_int > 1:  # skip PAD (1) and OOV (0)
-                        prev_tag_set.update(
-                            t for t in tag_lut[pi_int] if t > 0
-                        )
+                        prev_tag_set.update(t for t in tag_lut[pi_int] if t > 0)
                 if not prev_tag_set:
                     continue
                 cand_idx = int(cand_indices_int[b])
@@ -493,16 +476,14 @@ class InteractionsDataset(Dataset):
         # Uses the same _artist_per_idx + prev_artist_ids inputs as the
         # artist_repeat_count block above. PAD/OOV artist indices (0 or
         # _pad_artist) are excluded both target-side and history-side.
-        if (
-            "target_artist_in_history" in col_idx
-            and "prev_artist_ids" in col_idx
-            and "_artist_per_idx" in lookup
-        ):
+        if "target_artist_in_history" in col_idx and "prev_artist_ids" in col_idx and "_artist_per_idx" in lookup:
             cand_artists = np.asarray(
-                lookup["_artist_per_idx"][neg_arr], dtype=np.int64,
+                lookup["_artist_per_idx"][neg_arr],
+                dtype=np.int64,
             )  # [B]
             prev_artists = np.asarray(
-                input_list[col_idx["prev_artist_ids"]], dtype=np.int64,
+                input_list[col_idx["prev_artist_ids"]],
+                dtype=np.int64,
             )  # [B, L]
             pad_artist = lookup.get("_pad_artist", 0)
             valid_prev = (prev_artists > 0) & (prev_artists != pad_artist)
@@ -516,16 +497,14 @@ class InteractionsDataset(Dataset):
         # prev_album_ids, else 0.0. Mirrors V9F (artist) using album_id +
         # prev_album_ids; complementary to `album_continuation` (which checks
         # only the LAST prev album).
-        if (
-            "target_album_in_history" in col_idx
-            and "prev_album_ids" in col_idx
-            and "album_id" in lookup
-        ):
+        if "target_album_in_history" in col_idx and "prev_album_ids" in col_idx and "album_id" in lookup:
             cand_albums_aih = np.asarray(
-                lookup["album_id"][neg_arr], dtype=np.int64,
+                lookup["album_id"][neg_arr],
+                dtype=np.int64,
             )  # [B]
             prev_albums_aih = np.asarray(
-                input_list[col_idx["prev_album_ids"]], dtype=np.int64,
+                input_list[col_idx["prev_album_ids"]],
+                dtype=np.int64,
             )  # [B, L]
             pad_album_aih = int(lookup.get("_pad_album", 0))
             valid_prev_aih = (prev_albums_aih > 0) & (prev_albums_aih != pad_album_aih)
@@ -536,16 +515,14 @@ class InteractionsDataset(Dataset):
 
         # Computed: album_continuation = 1 if the candidate's album equals
         # the most recent (last non-PAD) album in prev_album_ids
-        if (
-            "album_continuation" in col_idx
-            and "prev_album_ids" in col_idx
-            and "album_id" in lookup
-        ):
+        if "album_continuation" in col_idx and "prev_album_ids" in col_idx and "album_id" in lookup:
             cand_albums = np.asarray(
-                lookup["album_id"][neg_arr], dtype=np.int64,
+                lookup["album_id"][neg_arr],
+                dtype=np.int64,
             )  # [B]
             prev_albums = np.asarray(
-                input_list[col_idx["prev_album_ids"]], dtype=np.int64,
+                input_list[col_idx["prev_album_ids"]],
+                dtype=np.int64,
             )  # [B, L]
             pad_album = lookup.get("_pad_album", 0)
             B = prev_albums.shape[0]
@@ -575,10 +552,12 @@ class InteractionsDataset(Dataset):
             and "track_isrc_country" in lookup
         ):
             cand_isrc = np.asarray(
-                lookup["track_isrc_country"][neg_arr], dtype=np.int64,
+                lookup["track_isrc_country"][neg_arr],
+                dtype=np.int64,
             )  # [B]
             prev_isrc = np.asarray(
-                input_list[col_idx["prev_isrc_country"]], dtype=np.int64,
+                input_list[col_idx["prev_isrc_country"]],
+                dtype=np.int64,
             )  # [B, L]
             # Treat OOV(0) and PAD(1) positions as "no value" so they don't
             # bias the rate denominator; require candidate to be a real idx.
@@ -588,7 +567,9 @@ class InteractionsDataset(Dataset):
             num = match.sum(axis=1).astype(np.float32)
             cand_valid = cand_isrc > 1
             rate = np.where(
-                (denom > 0) & cand_valid, num / np.maximum(denom, 1.0), 0.0,
+                (denom > 0) & cand_valid,
+                num / np.maximum(denom, 1.0),
+                0.0,
             )
             _set("seq_isrc_country_match_rate", rate)
 
@@ -601,10 +582,12 @@ class InteractionsDataset(Dataset):
             and "track_mood_cluster" in lookup
         ):
             cand_mood = np.asarray(
-                lookup["track_mood_cluster"][neg_arr], dtype=np.int64,
+                lookup["track_mood_cluster"][neg_arr],
+                dtype=np.int64,
             )  # [B]
             prev_mood = np.asarray(
-                input_list[col_idx["prev_mood_clusters"]], dtype=np.int64,
+                input_list[col_idx["prev_mood_clusters"]],
+                dtype=np.int64,
             )  # [B, L]
             valid_pos = prev_mood > 1
             denom = valid_pos.sum(axis=1).astype(np.float32)
@@ -612,7 +595,9 @@ class InteractionsDataset(Dataset):
             num = match.sum(axis=1).astype(np.float32)
             cand_valid = cand_mood > 1
             rate = np.where(
-                (denom > 0) & cand_valid, num / np.maximum(denom, 1.0), 0.0,
+                (denom > 0) & cand_valid,
+                num / np.maximum(denom, 1.0),
+                0.0,
             )
             _set("track_mood_cluster_seq_match", rate)
 
@@ -658,15 +643,10 @@ class InteractionsDataset(Dataset):
         # ``_input_columns`` so the returned tuple positions match the
         # model's ``forward`` signature.
         inputs = tuple(
-            self._packed_inputs[col.name][idx]
-            for col in self._input_columns
-            if col.name in self._packed_inputs
+            self._packed_inputs[col.name][idx] for col in self._input_columns if col.name in self._packed_inputs
         )
 
-        if (
-            self._project_config.item_is_input
-            and self._embeddings_for_metadata is not None
-        ):
+        if self._project_config.item_is_input and self._embeddings_for_metadata is not None:
             item_indices = inputs[self._item_input_index]
             inputs += tuple(
                 self._embeddings_for_metadata[column.name][item_indices]
@@ -676,15 +656,11 @@ class InteractionsDataset(Dataset):
 
         output: Any = self._packed_output[idx]
         if self._packed_aux_outputs:
-            output = (output,) + tuple(
-                arr[idx] for _, arr in self._packed_aux_outputs
-            )
+            output = (output,) + tuple(arr[idx] for _, arr in self._packed_aux_outputs)
 
         return inputs, output
 
-    def _relookup_metadata(
-        self, input_list: list, new_item_indices: np.ndarray
-    ) -> None:
+    def _relookup_metadata(self, input_list: list, new_item_indices: np.ndarray) -> None:
         """Re-look-up metadata columns for swapped item indices (in-place).
 
         After negative sampling replaces the item index, the metadata
@@ -694,15 +670,11 @@ class InteractionsDataset(Dataset):
         """
         if self._embeddings_for_metadata is None:
             return
-        n_packed = sum(
-            1 for c in self._input_columns if c.name in self._packed_inputs
-        )
+        n_packed = sum(1 for c in self._input_columns if c.name in self._packed_inputs)
         offset = 0
         for col in self._project_config.metadata_columns:
             if col.name not in self._data_frame.columns:
-                input_list[n_packed + offset] = (
-                    self._embeddings_for_metadata[col.name][new_item_indices]
-                )
+                input_list[n_packed + offset] = self._embeddings_for_metadata[col.name][new_item_indices]
                 offset += 1
 
 
@@ -728,27 +700,16 @@ class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):
         index_mapping: Dict[str, Dict[Any, int]],
         negative_proportion: float = 0.8,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame,
-            embeddings_for_metadata,
-            project_config,
-            index_mapping,
-            *args,
-            **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._max_item_idx = data_frame[project_config.item_column.name].max()
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -761,14 +722,10 @@ class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
 
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = np.array(
@@ -778,19 +735,19 @@ class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):
                 ]
             )
             self._relookup_metadata(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
                 input_ = tuple(
                     np.concatenate([positive_array, negative_array])
-                    for positive_array, negative_array in zip(
-                        positive_input, negative_input
-                    )
+                    for positive_array, negative_array in zip(positive_input, negative_input)
                 )
                 output = _concat_outputs(positive_output, negative_output)
             else:
@@ -803,9 +760,7 @@ class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):
         return input_, output
 
 
-class InteractionsWithNegativeItemGenerationByAvailableItemsDataset(
-    InteractionsDataset
-):
+class InteractionsWithNegativeItemGenerationByAvailableItemsDataset(InteractionsDataset):
     """Slate-restricted negative sampling.
 
     Like :class:`InteractionsWithNegativeItemGenerationDataset`, but
@@ -828,30 +783,22 @@ class InteractionsWithNegativeItemGenerationByAvailableItemsDataset(
         index_mapping: Dict[str, Dict[Any, int]],
         negative_proportion: float = 0.8,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
         assert project_config.available_items_column_name in data_frame
-        self._available_items = data_frame[project_config.available_items_column_name].map(
-            functools.partial(map_array, mapping=index_mapping[project_config.item_column.name])).values
-
-        super().__init__(
-            data_frame,
-            embeddings_for_metadata,
-            project_config,
-            index_mapping,
-            *args,
-            **kwargs
+        self._available_items = (
+            data_frame[project_config.available_items_column_name]
+            .map(functools.partial(map_array, mapping=index_mapping[project_config.item_column.name]))
+            .values
         )
+
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -879,16 +826,15 @@ class InteractionsWithNegativeItemGenerationByAvailableItemsDataset(
                 ]
             )
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
                 input_ = tuple(
                     np.concatenate([positive_array, negative_array])
-                    for positive_array, negative_array in zip(
-                        positive_input, negative_input
-                    )
+                    for positive_array, negative_array in zip(positive_input, negative_input)
                 )
                 output = _concat_outputs(positive_output, negative_output)
             else:
@@ -930,12 +876,9 @@ class InteractionsWithPopularityBasedNegativeSamplingDataset(InteractionsDataset
         smoothing_factor: float = 0.5,
         popularity_column: Optional[str] = None,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._max_item_idx = data_frame[project_config.item_column.name].max()
 
@@ -960,13 +903,9 @@ class InteractionsWithPopularityBasedNegativeSamplingDataset(InteractionsDataset
         self._item_probabilities = freq / total if total > 0 else np.ones_like(freq) / len(freq)
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -978,13 +917,9 @@ class InteractionsWithPopularityBasedNegativeSamplingDataset(InteractionsDataset
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             # Sample replacement items using popularity distribution
             original_items = negative_input[self._item_input_index]
@@ -996,22 +931,18 @@ class InteractionsWithPopularityBasedNegativeSamplingDataset(InteractionsDataset
             # Ensure sampled item differs from the original positive item
             for i in range(num_of_negatives):
                 while new_items[i] == original_items[i]:
-                    new_items[i] = np.random.choice(
-                        len(self._item_probabilities), p=self._item_probabilities
-                    )
+                    new_items[i] = np.random.choice(len(self._item_probabilities), p=self._item_probabilities)
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items.astype(np.int64)
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -1053,7 +984,7 @@ class InteractionsWithHardNegativeMiningDataset(InteractionsDataset):
         hard_negative_column: str = "hard_negatives",
         hard_negative_ratio: float = 0.5,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
         self._hard_negative_ratio = hard_negative_ratio
         self._has_hard_negatives = hard_negative_column in data_frame.columns
@@ -1062,25 +993,17 @@ class InteractionsWithHardNegativeMiningDataset(InteractionsDataset):
             self._hard_negatives = data_frame[hard_negative_column].values
             if len(self._hard_negatives) > 0 and isinstance(self._hard_negatives[0], str):
                 import ast
-                self._hard_negatives = np.array(
-                    [ast.literal_eval(v) for v in self._hard_negatives], dtype=object
-                )
 
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+                self._hard_negatives = np.array([ast.literal_eval(v) for v in self._hard_negatives], dtype=object)
+
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._max_item_idx = data_frame[project_config.item_column.name].max()
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -1092,13 +1015,9 @@ class InteractionsWithHardNegativeMiningDataset(InteractionsDataset):
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             original_items = negative_input[self._item_input_index]
             new_items = np.empty(num_of_negatives, dtype=np.int64)
@@ -1121,15 +1040,13 @@ class InteractionsWithHardNegativeMiningDataset(InteractionsDataset):
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -1172,12 +1089,9 @@ class InteractionsWithInBatchNegativesDataset(InteractionsDataset):
         include_random_negatives: bool = False,
         random_negative_proportion: float = 0.2,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._include_random_negatives = include_random_negatives
         self._random_negative_proportion = random_negative_proportion
         self._max_item_idx = data_frame[project_config.item_column.name].max()
@@ -1185,9 +1099,7 @@ class InteractionsWithInBatchNegativesDataset(InteractionsDataset):
     def __len__(self) -> int:
         base_len = super().__len__()
         if self._include_random_negatives:
-            return base_len + int(
-                (1 / (1 - self._random_negative_proportion) - 1) * base_len
-            )
+            return base_len + int((1 / (1 - self._random_negative_proportion) - 1) * base_len)
         return base_len
 
     def __getitem__(
@@ -1211,29 +1123,25 @@ class InteractionsWithInBatchNegativesDataset(InteractionsDataset):
             in_batch_items = np.array([], dtype=np.int64)
 
         if num_of_negatives > 0 and self._include_random_negatives:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             negative_input = list(negative_input)
-            negative_input[self._item_input_index] = np.array([
-                _rand_int_except(0, self._max_item_idx + 1, item_idx)
-                for item_idx in negative_input[self._item_input_index]
-            ])
+            negative_input[self._item_input_index] = np.array(
+                [
+                    _rand_int_except(0, self._max_item_idx + 1, item_idx)
+                    for item_idx in negative_input[self._item_input_index]
+                ]
+            )
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -1274,12 +1182,9 @@ class InteractionsWithTimeAwareNegativeSamplingDataset(InteractionsDataset):
             Union[Dict[int, float], Callable[[Dict[str, Dict[Any, int]]], Dict[int, float]]]
         ] = None,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._max_item_idx = data_frame[project_config.item_column.name].max()
 
@@ -1297,27 +1202,28 @@ class InteractionsWithTimeAwareNegativeSamplingDataset(InteractionsDataset):
         if callable(item_first_seen):
             try:
                 sig = inspect.signature(item_first_seen)
-                arity = len([
-                    p for p in sig.parameters.values()
-                    if p.kind in (
-                        inspect.Parameter.POSITIONAL_ONLY,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    ) and p.default is inspect.Parameter.empty
-                ])
+                arity = len(
+                    [
+                        p
+                        for p in sig.parameters.values()
+                        if p.kind
+                        in (
+                            inspect.Parameter.POSITIONAL_ONLY,
+                            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        )
+                        and p.default is inspect.Parameter.empty
+                    ]
+                )
             except (TypeError, ValueError):
                 arity = 0
-            item_first_seen = (
-                item_first_seen(index_mapping) if arity >= 1 else item_first_seen()
-            )
+            item_first_seen = item_first_seen(index_mapping) if arity >= 1 else item_first_seen()
 
         # Build item_first_seen mapping
         if item_first_seen is not None:
             self._item_first_seen = item_first_seen
         elif self._timestamps is not None:
             item_col = project_config.item_column.name
-            self._item_first_seen = (
-                data_frame.groupby(item_col)[ts_col].min().to_dict()
-            )
+            self._item_first_seen = data_frame.groupby(item_col)[ts_col].min().to_dict()
         else:
             self._item_first_seen = None
 
@@ -1334,9 +1240,7 @@ class InteractionsWithTimeAwareNegativeSamplingDataset(InteractionsDataset):
             self._first_seen_sorted = self._first_seen_array[self._items_sorted_by_time]
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
     def _sample_item_before(self, timestamp: float, exclude: int) -> int:
         """Sample a random item whose first_seen <= timestamp, excluding `exclude`."""
@@ -1359,9 +1263,7 @@ class InteractionsWithTimeAwareNegativeSamplingDataset(InteractionsDataset):
                 return int(chosen)
         return int(eligible[0]) if eligible[0] != exclude else int(eligible[-1])
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -1373,40 +1275,34 @@ class InteractionsWithTimeAwareNegativeSamplingDataset(InteractionsDataset):
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             original_items = negative_input[self._item_input_index]
 
             if self._timestamps is not None:
                 timestamps = self._timestamps[sample_positive_indices]
-                new_items = np.array([
-                    self._sample_item_before(ts, item_idx)
-                    for ts, item_idx in zip(timestamps, original_items)
-                ], dtype=np.int64)
+                new_items = np.array(
+                    [self._sample_item_before(ts, item_idx) for ts, item_idx in zip(timestamps, original_items)],
+                    dtype=np.int64,
+                )
             else:
-                new_items = np.array([
-                    _rand_int_except(0, self._max_item_idx + 1, item_idx)
-                    for item_idx in original_items
-                ], dtype=np.int64)
+                new_items = np.array(
+                    [_rand_int_except(0, self._max_item_idx + 1, item_idx) for item_idx in original_items],
+                    dtype=np.int64,
+                )
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -1447,12 +1343,9 @@ class InteractionsWithCurriculumNegativeSamplingDataset(InteractionsDataset):
         warmup_epochs: int = 3,
         smoothing_factor: float = 0.75,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._max_item_idx = data_frame[project_config.item_column.name].max()
         self._total_epochs = total_epochs
@@ -1495,13 +1388,9 @@ class InteractionsWithCurriculumNegativeSamplingDataset(InteractionsDataset):
         self._current_probs /= self._current_probs.sum()
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -1513,13 +1402,9 @@ class InteractionsWithCurriculumNegativeSamplingDataset(InteractionsDataset):
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             original_items = negative_input[self._item_input_index]
             new_items = np.random.choice(
@@ -1529,22 +1414,18 @@ class InteractionsWithCurriculumNegativeSamplingDataset(InteractionsDataset):
             )
             for i in range(num_of_negatives):
                 while new_items[i] == original_items[i]:
-                    new_items[i] = np.random.choice(
-                        len(self._current_probs), p=self._current_probs
-                    )
+                    new_items[i] = np.random.choice(len(self._current_probs), p=self._current_probs)
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items.astype(np.int64)
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -1596,12 +1477,9 @@ class InteractionsWithEmbeddingHardNegativeDataset(InteractionsDataset):
         uniform_fallback_ratio: float = 0.2,
         top_k_use: int = 50,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._uniform_fallback_ratio = float(uniform_fallback_ratio)
         self._top_k_use = int(top_k_use)
@@ -1609,23 +1487,18 @@ class InteractionsWithEmbeddingHardNegativeDataset(InteractionsDataset):
 
         if not neighbors_path:
             raise ValueError(
-                "InteractionsWithEmbeddingHardNegativeDataset requires "
-                "`neighbors_path` (path to a top-K NN pickle)."
+                "InteractionsWithEmbeddingHardNegativeDataset requires `neighbors_path` (path to a top-K NN pickle)."
             )
         if not os.path.isfile(neighbors_path):
-            raise FileNotFoundError(
-                f"Neighbour matrix not found at {neighbors_path}. "
-                f"Run the pre-compute step first."
-            )
+            raise FileNotFoundError(f"Neighbour matrix not found at {neighbors_path}. Run the pre-compute step first.")
 
         import pickle as _pickle
+
         with open(neighbors_path, "rb") as f:
             uuid_to_neighbors: Dict[Any, List[Any]] = _pickle.load(f)
 
         item_idx_map = index_mapping.get(project_config.item_column.name, {}) or {}
-        self._neighbors_by_idx: List[np.ndarray] = [
-            np.empty(0, dtype=np.int64) for _ in range(self._max_item_idx + 1)
-        ]
+        self._neighbors_by_idx: List[np.ndarray] = [np.empty(0, dtype=np.int64) for _ in range(self._max_item_idx + 1)]
         matched = 0
         for uuid, neigh_uuids in uuid_to_neighbors.items():
             if uuid not in item_idx_map:
@@ -1642,19 +1515,16 @@ class InteractionsWithEmbeddingHardNegativeDataset(InteractionsDataset):
                 self._neighbors_by_idx[src_idx] = np.asarray(neigh_idx, dtype=np.int64)
                 matched += 1
         logger.info(
-            "EmbeddingHardNegative: matched %d/%d items in index_mapping "
-            "(top_k_use=%d)",
-            matched, len(uuid_to_neighbors), self._top_k_use,
+            "EmbeddingHardNegative: matched %d/%d items in index_mapping (top_k_use=%d)",
+            matched,
+            len(uuid_to_neighbors),
+            self._top_k_use,
         )
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -1666,13 +1536,9 @@ class InteractionsWithEmbeddingHardNegativeDataset(InteractionsDataset):
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             original_items = negative_input[self._item_input_index]
             new_items = np.empty(num_of_negatives, dtype=np.int64)
@@ -1681,9 +1547,7 @@ class InteractionsWithEmbeddingHardNegativeDataset(InteractionsDataset):
             for i in range(num_of_negatives):
                 src = int(original_items[i])
                 neighbours = (
-                    self._neighbors_by_idx[src]
-                    if 0 <= src <= self._max_item_idx
-                    else np.empty(0, dtype=np.int64)
+                    self._neighbors_by_idx[src] if 0 <= src <= self._max_item_idx else np.empty(0, dtype=np.int64)
                 )
                 want_uniform = (i < n_uniform) or (neighbours.size == 0)
                 if want_uniform:
@@ -1697,15 +1561,13 @@ class InteractionsWithEmbeddingHardNegativeDataset(InteractionsDataset):
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -1746,19 +1608,19 @@ class InteractionsWithCandidateProviderNegativeDataset(InteractionsDataset):
         negative_proportion: float = 0.8,
         provider_extras: Optional[Dict[str, Any]] = None,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._max_item_idx = int(data_frame[project_config.item_column.name].max())
         self._df_for_rows = data_frame.reset_index(drop=True)
 
         from mars_rec.filtering import resolve_candidate_provider
+
         self._provider = resolve_candidate_provider(
-            project_config, index_mapping, provider_extras or {},
+            project_config,
+            index_mapping,
+            provider_extras or {},
         )
         if self._provider is None:
             raise ValueError(
@@ -1768,19 +1630,13 @@ class InteractionsWithCandidateProviderNegativeDataset(InteractionsDataset):
             )
 
         item_map = index_mapping.get(project_config.item_column.name, {}) or {}
-        idx = sorted(
-            int(v) for k, v in item_map.items() if k is not None and int(v) > 1
-        )
+        idx = sorted(int(v) for k, v in item_map.items() if k is not None and int(v) > 1)
         self._full_catalog = np.asarray(idx, dtype=np.int64)
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -1792,13 +1648,9 @@ class InteractionsWithCandidateProviderNegativeDataset(InteractionsDataset):
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             original_items = negative_input[self._item_input_index]
             new_items = np.empty(num_of_negatives, dtype=np.int64)
@@ -1808,7 +1660,9 @@ class InteractionsWithCandidateProviderNegativeDataset(InteractionsDataset):
                 eligible = self._provider.get_candidates(row, self._full_catalog)
                 if eligible is None or len(eligible) == 0:
                     new_items[i] = _rand_int_except(
-                        0, self._max_item_idx + 1, int(original_items[i]),
+                        0,
+                        self._max_item_idx + 1,
+                        int(original_items[i]),
                     )
                     continue
                 pick = int(np.random.choice(eligible))
@@ -1819,15 +1673,13 @@ class InteractionsWithCandidateProviderNegativeDataset(InteractionsDataset):
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -1871,12 +1723,9 @@ class InteractionsWithDynamicNegativeMiningDataset(InteractionsDataset):
         candidates_per_slot: int = 8,
         warmup_steps: int = 0,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._max_item_idx = int(data_frame[project_config.item_column.name].max())
         self._candidates_per_slot = max(1, int(candidates_per_slot))
@@ -1891,9 +1740,7 @@ class InteractionsWithDynamicNegativeMiningDataset(InteractionsDataset):
         self._device = device
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
     def _draw_candidates(
         self,
@@ -1924,13 +1771,13 @@ class InteractionsWithDynamicNegativeMiningDataset(InteractionsDataset):
             src = int(it)
             for k in range(K):
                 cand_items[i, k] = _rand_int_except(
-                    0, self._max_item_idx + 1, src,
+                    0,
+                    self._max_item_idx + 1,
+                    src,
                 )
         return cand_items
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -1942,31 +1789,28 @@ class InteractionsWithDynamicNegativeMiningDataset(InteractionsDataset):
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             original_items = negative_input[self._item_input_index]
             self._step_counter += 1
-            use_dns = (
-                self._model is not None
-                and self._step_counter > self._warmup_steps
-            )
+            use_dns = self._model is not None and self._step_counter > self._warmup_steps
 
             if not use_dns:
                 # Warmup: 1 candidate per slot, no scoring.
                 draws = self._draw_candidates(
-                    sample_positive_indices, original_items, K=1,
+                    sample_positive_indices,
+                    original_items,
+                    K=1,
                 )
                 new_items = draws[:, 0]
             else:
                 K = self._candidates_per_slot
                 cand_items = self._draw_candidates(
-                    sample_positive_indices, original_items, K=K,
+                    sample_positive_indices,
+                    original_items,
+                    K=K,
                 )
 
                 tiled_input = []
@@ -1979,15 +1823,15 @@ class InteractionsWithDynamicNegativeMiningDataset(InteractionsDataset):
                 flat_cand = cand_items.reshape(-1)
                 tiled_input[self._item_input_index] = flat_cand
                 tiled_input = self._apply_candidate_features(
-                    tuple(tiled_input), flat_cand,
+                    tuple(tiled_input),
+                    flat_cand,
                 )
 
                 import torch as _torch
+
                 with _torch.no_grad():
                     inputs = [
-                        _torch.as_tensor(t).to(self._device)
-                        if isinstance(t, np.ndarray) else t
-                        for t in tiled_input
+                        _torch.as_tensor(t).to(self._device) if isinstance(t, np.ndarray) else t for t in tiled_input
                     ]
                     s = self._model(*inputs)
                     if s.dim() > 1:
@@ -2000,15 +1844,13 @@ class InteractionsWithDynamicNegativeMiningDataset(InteractionsDataset):
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -2092,12 +1934,16 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
             negative_proportion=negative_proportion,
             candidates_per_slot=candidates_per_slot,
             warmup_steps=warmup_steps,
-            *args, **kwargs,
+            *args,
+            **kwargs,
         )
 
         from mars_rec.filtering import resolve_candidate_provider
+
         self._provider = resolve_candidate_provider(
-            project_config, index_mapping, provider_extras or {},
+            project_config,
+            index_mapping,
+            provider_extras or {},
         )
         if self._provider is None:
             raise ValueError(
@@ -2107,16 +1953,12 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
             )
 
         item_map = index_mapping.get(project_config.item_column.name, {}) or {}
-        idx = sorted(
-            int(v) for k, v in item_map.items() if k is not None and int(v) > 1
-        )
+        idx = sorted(int(v) for k, v in item_map.items() if k is not None and int(v) > 1)
         self._full_catalog = np.asarray(idx, dtype=np.int64)
         # Reset-index'd copy so iloc[src_pos_idx] is well-defined regardless
         # of any upstream reindexing / shuffling done by the prep pipeline.
         self._df_for_rows = data_frame.reset_index(drop=True)
-        self._eligibles_cap = (
-            None if eligibles_cap is None else int(eligibles_cap)
-        )
+        self._eligibles_cap = None if eligibles_cap is None else int(eligibles_cap)
 
         # Precompute per-row eligibles once. This avoids the deadlock that
         # was observed on Vertex when bm25s.retrieve was called per row
@@ -2147,12 +1989,14 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
         """
         import logging as _logging
         import time as _time
+
         _logger = _logging.getLogger(__name__)
 
         n = len(self._df_for_rows)
         result: List[np.ndarray] = [None] * n  # type: ignore[list-item]
         _logger.info(
-            "Precomputing CandidateProvider eligibles for %d rows ...", n,
+            "Precomputing CandidateProvider eligibles for %d rows ...",
+            n,
         )
         t0 = _time.time()
         log_every = max(1, n // 20)  # ~20 progress lines
@@ -2164,17 +2008,22 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
             )
             if self._eligibles_cap is not None and elig.size > self._eligibles_cap:
                 elig = np.random.choice(
-                    elig, size=self._eligibles_cap, replace=False,
+                    elig,
+                    size=self._eligibles_cap,
+                    replace=False,
                 ).astype(np.int32, copy=False)
             result[i] = elig
             if (i + 1) % log_every == 0 or (i + 1) == n:
                 _logger.info(
                     "  %d/%d rows  elapsed=%.1fs",
-                    i + 1, n, _time.time() - t0,
+                    i + 1,
+                    n,
+                    _time.time() - t0,
                 )
         _logger.info(
             "CandidateProvider precomputation done in %.1fs (%d rows)",
-            _time.time() - t0, n,
+            _time.time() - t0,
+            n,
         )
         return result
 
@@ -2217,18 +2066,24 @@ class InteractionsWithDynamicNegativeMiningCandidateProviderDataset(
                 # No eligibles — fall back to uniform.
                 for k in range(K):
                     cand_items[i, k] = _rand_int_except(
-                        0, self._max_item_idx + 1, exclude,
+                        0,
+                        self._max_item_idx + 1,
+                        exclude,
                     )
                 continue
             if eligible.size >= K:
                 cand_items[i, :] = np.random.choice(
-                    eligible, size=K, replace=False,
+                    eligible,
+                    size=K,
+                    replace=False,
                 )
             else:
                 # Fewer than K eligibles — sample with replacement so we
                 # always return a [K]-sized vector.
                 cand_items[i, :] = np.random.choice(
-                    eligible, size=K, replace=True,
+                    eligible,
+                    size=K,
+                    replace=True,
                 )
         return cand_items
 
@@ -2273,17 +2128,14 @@ class InteractionsWithMixedDnsUniformDataset(
             negative_proportion=negative_proportion,
             candidates_per_slot=candidates_per_slot,
             warmup_steps=warmup_steps,
-            *args, **kwargs,
+            *args,
+            **kwargs,
         )
         if not (0.0 <= uniform_fraction <= 1.0):
-            raise ValueError(
-                f"uniform_fraction must be in [0, 1], got {uniform_fraction}"
-            )
+            raise ValueError(f"uniform_fraction must be in [0, 1], got {uniform_fraction}")
         self._uniform_fraction = float(uniform_fraction)
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -2296,40 +2148,35 @@ class InteractionsWithMixedDnsUniformDataset(
         positive_indices = [index for index in indices if index < n]
         num_of_negatives = len(indices) - len(positive_indices)
         positive_input, positive_output = InteractionsDataset.__getitem__(
-            self, positive_indices,
+            self,
+            positive_indices,
         )
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = InteractionsDataset.__getitem__(
-                self, sample_positive_indices,
+                self,
+                sample_positive_indices,
             )
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             original_items = negative_input[self._item_input_index]
             self._step_counter += 1
-            use_dns_phase = (
-                self._model is not None
-                and self._step_counter > self._warmup_steps
-            )
+            use_dns_phase = self._model is not None and self._step_counter > self._warmup_steps
 
             if not use_dns_phase or self._uniform_fraction >= 1.0:
                 # Warmup OR all-uniform: 1 candidate per slot, no scoring.
                 draws = self._draw_candidates(
-                    sample_positive_indices, original_items, K=1,
+                    sample_positive_indices,
+                    original_items,
+                    K=1,
                 )
                 new_items = draws[:, 0]
             else:
                 # Per-slot Bernoulli on which slots use DNS vs uniform.
                 # Uniform slots: draw 1 candidate each (no scoring).
                 # DNS slots: draw K candidates and keep argmax(score).
-                uniform_mask = (
-                    np.random.random(num_of_negatives) < self._uniform_fraction
-                )
+                uniform_mask = np.random.random(num_of_negatives) < self._uniform_fraction
                 dns_mask = ~uniform_mask
                 new_items = np.empty(num_of_negatives, dtype=np.int64)
 
@@ -2339,7 +2186,9 @@ class InteractionsWithMixedDnsUniformDataset(
                     unif_pos_idxs = [sample_positive_indices[i] for i in unif_idx]
                     unif_originals = original_items[unif_idx]
                     unif_draws = self._draw_candidates(
-                        unif_pos_idxs, unif_originals, K=1,
+                        unif_pos_idxs,
+                        unif_originals,
+                        K=1,
                     )
                     new_items[unif_idx] = unif_draws[:, 0]
 
@@ -2350,7 +2199,9 @@ class InteractionsWithMixedDnsUniformDataset(
                     dns_originals = original_items[dns_idx]
                     K = self._candidates_per_slot
                     cand_items = self._draw_candidates(
-                        dns_pos_idxs, dns_originals, K=K,
+                        dns_pos_idxs,
+                        dns_originals,
+                        K=K,
                     )
                     # Build the input tile only for DNS slots.
                     dns_negative_input = []
@@ -2368,39 +2219,37 @@ class InteractionsWithMixedDnsUniformDataset(
                     flat_cand = cand_items.reshape(-1)
                     tiled_input[self._item_input_index] = flat_cand
                     tiled_input = self._apply_candidate_features(
-                        tuple(tiled_input), flat_cand,
+                        tuple(tiled_input),
+                        flat_cand,
                     )
 
                     import torch as _torch
+
                     with _torch.no_grad():
                         inputs = [
-                            _torch.as_tensor(t).to(self._device)
-                            if isinstance(t, np.ndarray) else t
+                            _torch.as_tensor(t).to(self._device) if isinstance(t, np.ndarray) else t
                             for t in tiled_input
                         ]
                         s = self._model(*inputs)
                         if s.dim() > 1:
                             s = s.squeeze(-1)
-                        scores = (
-                            s.detach().cpu().numpy().reshape(len(dns_idx), K)
-                        )
+                        scores = s.detach().cpu().numpy().reshape(len(dns_idx), K)
                     argmax = scores.argmax(axis=1)
                     new_items[dns_idx] = cand_items[
-                        np.arange(len(dns_idx)), argmax,
+                        np.arange(len(dns_idx)),
+                        argmax,
                     ]
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input
@@ -2452,12 +2301,9 @@ class InteractionsWithMixedHardNegativeDataset(InteractionsDataset):
         popularity_column: Optional[str] = None,
         top_k_use: int = 50,
         *args,
-        **kwargs
+        **kwargs,
     ) -> None:
-        super().__init__(
-            data_frame, embeddings_for_metadata, project_config,
-            index_mapping, *args, **kwargs
-        )
+        super().__init__(data_frame, embeddings_for_metadata, project_config, index_mapping, *args, **kwargs)
         self._negative_proportion = negative_proportion
         self._max_item_idx = int(data_frame[project_config.item_column.name].max())
 
@@ -2471,18 +2317,14 @@ class InteractionsWithMixedHardNegativeDataset(InteractionsDataset):
         self._neighbors_by_idx: List[np.ndarray] = []
         if self._ann_ratio > 0.0:
             if not neighbors_path or not os.path.isfile(neighbors_path):
-                raise FileNotFoundError(
-                    f"Mixed sampler with ann_ratio>0 needs neighbors_path; "
-                    f"got {neighbors_path!r}"
-                )
+                raise FileNotFoundError(f"Mixed sampler with ann_ratio>0 needs neighbors_path; got {neighbors_path!r}")
             import pickle as _pickle
+
             with open(neighbors_path, "rb") as f:
                 uuid_to_neighbors: Dict[Any, List[Any]] = _pickle.load(f)
 
             item_idx_map = index_mapping.get(project_config.item_column.name, {}) or {}
-            self._neighbors_by_idx = [
-                np.empty(0, dtype=np.int64) for _ in range(self._max_item_idx + 1)
-            ]
+            self._neighbors_by_idx = [np.empty(0, dtype=np.int64) for _ in range(self._max_item_idx + 1)]
             for uuid, neigh_uuids in uuid_to_neighbors.items():
                 if uuid not in item_idx_map:
                     continue
@@ -2511,39 +2353,44 @@ class InteractionsWithMixedHardNegativeDataset(InteractionsDataset):
                     freq[int(item_idx)] = float(count)
         freq = np.power(freq, smoothing_factor)
         total_pop = freq.sum()
-        self._popularity_probs = (
-            freq / total_pop if total_pop > 0 else np.ones_like(freq) / len(freq)
-        )
+        self._popularity_probs = freq / total_pop if total_pop > 0 else np.ones_like(freq) / len(freq)
 
     def __len__(self) -> int:
-        return super().__len__() + int(
-            (1 / (1 - self._negative_proportion) - 1) * super().__len__()
-        )
+        return super().__len__() + int((1 / (1 - self._negative_proportion) - 1) * super().__len__())
 
     def _sample_one(self, src: int, source: str) -> int:
         if source == "ann":
-            if (
-                self._neighbors_by_idx
-                and 0 <= src <= self._max_item_idx
-                and self._neighbors_by_idx[src].size > 0
-            ):
+            if self._neighbors_by_idx and 0 <= src <= self._max_item_idx and self._neighbors_by_idx[src].size > 0:
                 pick = int(np.random.choice(self._neighbors_by_idx[src]))
-                return pick if pick != src else _rand_int_except(
-                    0, self._max_item_idx + 1, src,
+                return (
+                    pick
+                    if pick != src
+                    else _rand_int_except(
+                        0,
+                        self._max_item_idx + 1,
+                        src,
+                    )
                 )
             source = "pop"
         if source == "pop":
-            pick = int(np.random.choice(
-                len(self._popularity_probs), p=self._popularity_probs,
-            ))
-            return pick if pick != src else _rand_int_except(
-                0, self._max_item_idx + 1, src,
+            pick = int(
+                np.random.choice(
+                    len(self._popularity_probs),
+                    p=self._popularity_probs,
+                )
+            )
+            return (
+                pick
+                if pick != src
+                else _rand_int_except(
+                    0,
+                    self._max_item_idx + 1,
+                    src,
+                )
             )
         return _rand_int_except(0, self._max_item_idx + 1, src)
 
-    def __getitem__(
-        self, indices: Union[int, List[int], slice]
-    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+    def __getitem__(self, indices: Union[int, List[int], slice]) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
         if isinstance(indices, int):
             indices = [indices]
         if isinstance(indices, slice):
@@ -2555,13 +2402,9 @@ class InteractionsWithMixedHardNegativeDataset(InteractionsDataset):
         positive_input, positive_output = super().__getitem__(positive_indices)
 
         if num_of_negatives > 0:
-            sample_positive_indices = list(
-                np.random.randint(0, n, size=num_of_negatives)
-            )
+            sample_positive_indices = list(np.random.randint(0, n, size=num_of_negatives))
             negative_input, _ = super().__getitem__(sample_positive_indices)
-            negative_output = self._convert_dtype(
-                np.zeros(num_of_negatives), self._project_config.output_column.type
-            )
+            negative_output = self._convert_dtype(np.zeros(num_of_negatives), self._project_config.output_column.type)
 
             original_items = negative_input[self._item_input_index]
 
@@ -2570,23 +2413,20 @@ class InteractionsWithMixedHardNegativeDataset(InteractionsDataset):
                 size=num_of_negatives,
                 p=[self._ann_ratio, self._pop_ratio, self._unif_ratio],
             )
-            new_items = np.array([
-                self._sample_one(int(src), source=sources[i])
-                for i, src in enumerate(original_items)
-            ], dtype=np.int64)
+            new_items = np.array(
+                [self._sample_one(int(src), source=sources[i]) for i, src in enumerate(original_items)], dtype=np.int64
+            )
 
             negative_input = list(negative_input)
             negative_input[self._item_input_index] = new_items
             negative_input = self._apply_candidate_features(
-                negative_input, negative_input[self._item_input_index],
+                negative_input,
+                negative_input[self._item_input_index],
             )
             negative_input = tuple(negative_input)
 
             if positive_indices:
-                input_ = tuple(
-                    np.concatenate([p, n_])
-                    for p, n_ in zip(positive_input, negative_input)
-                )
+                input_ = tuple(np.concatenate([p, n_]) for p, n_ in zip(positive_input, negative_input))
                 output = _concat_outputs(positive_output, negative_output)
             else:
                 input_ = negative_input

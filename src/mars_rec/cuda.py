@@ -7,6 +7,7 @@ implements the simplest possible solution: a disk-backed Deque
 (``diskcache``) treated as a pool of free device ids — workers
 ``pop`` to acquire and ``append`` to release.
 """
+
 import os
 
 import torch
@@ -23,9 +24,7 @@ class CudaRepository(object):
     def fill(cls):
         """Reset the pool to ``[0, 1, …, torch.cuda.device_count() - 1]``."""
         CudaRepository._avaliable_devices.clear()
-        CudaRepository._avaliable_devices.extend(
-            [i for i in range(torch.cuda.device_count())]
-        )
+        CudaRepository._avaliable_devices.extend([i for i in range(torch.cuda.device_count())])
 
     @classmethod
     def get_avaliable_device(self) -> int:

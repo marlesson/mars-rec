@@ -53,10 +53,22 @@ class TestPreprocess:
 class TestMetricRegistry:
     def test_all_metrics_registered(self):
         expected = {
-            "bce", "binary_accuracy", "precision", "recall", "f1_score",
-            "mse", "mae", "rmse",
-            "accuracy", "top_5_accuracy", "top_10_accuracy", "top_20_accuracy",
-            "ndcg@5", "ndcg@10", "ndcg@20", "mrr@10",
+            "bce",
+            "binary_accuracy",
+            "precision",
+            "recall",
+            "f1_score",
+            "mse",
+            "mae",
+            "rmse",
+            "accuracy",
+            "top_5_accuracy",
+            "top_10_accuracy",
+            "top_20_accuracy",
+            "ndcg@5",
+            "ndcg@10",
+            "ndcg@20",
+            "mrr@10",
             # Embedding similarity — used by EmbeddingRecommenderLightningModule.
             "avg_cosine_similarity",
         }
@@ -67,8 +79,14 @@ class TestMetricRegistry:
         y_pred = torch.tensor([0.8, 0.2])
         y_true = torch.tensor([1.0, 0.0])
         binary_metric_names = {
-            "bce", "binary_accuracy", "precision", "recall", "f1_score",
-            "mse", "mae", "rmse",
+            "bce",
+            "binary_accuracy",
+            "precision",
+            "recall",
+            "f1_score",
+            "mse",
+            "mae",
+            "rmse",
         }
         for name in binary_metric_names:
             fn = METRIC_REGISTRY[name]
@@ -80,8 +98,14 @@ class TestMetricRegistry:
         y_pred = torch.randn(4, 10)  # [B=4, C=10]
         y_true = torch.tensor([2, 5, 0, 7])  # class indices
         multiclass_metrics = {
-            "accuracy", "top_5_accuracy", "top_10_accuracy", "top_20_accuracy",
-            "ndcg@5", "ndcg@10", "ndcg@20", "mrr@10",
+            "accuracy",
+            "top_5_accuracy",
+            "top_10_accuracy",
+            "top_20_accuracy",
+            "ndcg@5",
+            "ndcg@10",
+            "ndcg@20",
+            "mrr@10",
         }
         for name in multiclass_metrics:
             fn = METRIC_REGISTRY[name]
@@ -440,8 +464,10 @@ class TestComputeRocAuc:
         y_onehot[np.arange(n), y_true] = 1
 
         auc = roc_auc_score(
-            y_onehot[:, present], probs[:, present],
-            multi_class="ovr", average="macro",
+            y_onehot[:, present],
+            probs[:, present],
+            multi_class="ovr",
+            average="macro",
         )
         assert 0.0 <= auc <= 1.0
 

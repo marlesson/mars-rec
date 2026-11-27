@@ -14,6 +14,7 @@ The functions in this module build those paths from a ``task_dir`` or
 ``task_id``. :data:`OUTPUT_PATH` is configurable via the
 ``OUTPUT_PATH`` env var (or ``AIP_MODEL_DIR`` when running on Vertex AI).
 """
+
 import os
 import json
 from typing import Type

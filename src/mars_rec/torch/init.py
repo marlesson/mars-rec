@@ -5,6 +5,7 @@ Registered in
 ``lecun_normal`` and ``he`` choices; ``xavier_normal`` is the
 standard PyTorch initialiser.
 """
+
 import torch
 from math import sqrt
 from torch import nn

@@ -6,6 +6,7 @@ The CLI is the user entry point — ``mars-rec run``, ``predict``,
 - required-argument enforcement (``predict`` needs --model-dir OR --task-id);
 - luigi dispatch (_run_luigi) and _invalidate_supervised_cache parsing.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -41,8 +42,7 @@ def test_predict_with_nonexistent_model_dir_errors_out():
     runner = CliRunner()
     result = runner.invoke(
         cli_mod.cli,
-        ["predict", "--model-dir", "/tmp/does_not_exist_xyz",
-         "--data", "/tmp/no.parquet"],
+        ["predict", "--model-dir", "/tmp/does_not_exist_xyz", "--data", "/tmp/no.parquet"],
     )
     assert result.exit_code != 0
     assert "not found" in result.output.lower()
@@ -72,8 +72,7 @@ def test_evaluate_with_nonexistent_data_errors_out(tmp_path):
     runner = CliRunner()
     result = runner.invoke(
         cli_mod.cli,
-        ["evaluate", "--model-dir", str(model_dir),
-         "--data", "/tmp/does_not_exist_data.parquet"],
+        ["evaluate", "--model-dir", str(model_dir), "--data", "/tmp/does_not_exist_data.parquet"],
     )
     assert result.exit_code != 0
     # The CLI prints "Data file not found"
@@ -136,7 +135,8 @@ def test_run_luigi_propagates_failure_exit_code(monkeypatch):
     import subprocess
 
     monkeypatch.setattr(
-        cli_mod.subprocess, "run",
+        cli_mod.subprocess,
+        "run",
         lambda cmd, env: subprocess.CompletedProcess(cmd, 30),
     )
     with pytest.raises(SystemExit) as exc:

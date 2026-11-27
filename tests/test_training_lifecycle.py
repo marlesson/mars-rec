@@ -13,6 +13,7 @@ This protects against the regressions that prompted the plan:
 - xattn_v3 retrain collapse (silent hyperparam drift on save/load);
 - generally, any silent contract change between save and load paths.
 """
+
 from __future__ import annotations
 
 import copy
@@ -37,6 +38,7 @@ from mars_rec.torch.lightning_module import RecommenderLightningModule
 # ---------------------------------------------------------------------------
 # A minimal project ``load_attr`` can resolve from a task_dir's params.json.
 # ---------------------------------------------------------------------------
+
 
 class _MinimalPrep(BasePrepareDataFrames):
     @property
@@ -103,9 +105,7 @@ def _save_task_artifacts(task_dir, model: nn.Module):
     }
     params = {
         "project": __name__ + ".lifecycle_test_config",
-        "recommender_module_class": (
-            "mars_rec.model.base_model.LogisticRegression"
-        ),
+        "recommender_module_class": ("mars_rec.model.base_model.LogisticRegression"),
         "recommender_extra_params": {"n_factors": 8},
     }
     with open(task_dir / "params.json", "w") as f:
@@ -121,6 +121,7 @@ def _save_task_artifacts(task_dir, model: nn.Module):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestSaveLoadPredictRoundtrip:
     def test_loaded_model_predicts_same_as_in_memory(self, tmp_task_dir):
@@ -152,9 +153,7 @@ class TestSaveLoadPredictRoundtrip:
         model, _, _ = _build_model_and_data(seed=22)
         _save_task_artifacts(tmp_task_dir, model)
 
-        loaded_model, project_config, index_mapping, params = load_trained_model(
-            str(tmp_task_dir)
-        )
+        loaded_model, project_config, index_mapping, params = load_trained_model(str(tmp_task_dir))
         # Resolved module class is LogisticRegression (not something else).
         assert type(loaded_model).__name__ == "LogisticRegression"
         # n_factors came from extra_params.
@@ -190,6 +189,7 @@ class TestLightningCheckpointBestVal:
         recovered models would be stale. Exercises the contract end-to-
         end with a synthetic monotonically-improving validation loss.
         """
+
         # A tiny stand-in module just to satisfy LightningModule signatures.
         class _Toy(pl.LightningModule):
             def __init__(self):
@@ -211,7 +211,8 @@ class TestLightningCheckpointBestVal:
 
             def on_validation_epoch_end(self):
                 self._epoch_idx = min(
-                    self._epoch_idx + 1, len(self._planned_val_losses) - 1,
+                    self._epoch_idx + 1,
+                    len(self._planned_val_losses) - 1,
                 )
 
             def configure_optimizers(self):
@@ -250,6 +251,7 @@ class TestLightningCheckpointBestVal:
 # ---------------------------------------------------------------------------
 # RecommenderLightningModule + checkpoint format integration
 # ---------------------------------------------------------------------------
+
 
 class TestLightningModuleCheckpointShape:
     def test_lightning_checkpoint_has_module_prefix(self, tmp_path):

@@ -9,6 +9,7 @@ Tests that need richer schemas (per-candidate features, metadata
 embeddings, sequence inputs) are expected to extend these locally rather
 than pollute conftest with project-specific defaults.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -28,6 +29,7 @@ from mars_rec.meta_config import Column, IOType, ProjectConfig
 # ---------------------------------------------------------------------------
 # ProjectConfig fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def minimal_project_config() -> ProjectConfig:
@@ -69,6 +71,7 @@ def mixed_project_config() -> ProjectConfig:
 # Index mapping fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def index_mapping_small() -> Dict[str, Dict[Any, int]]:
     """Honours framework convention: 0=OOV, 1=NaN, 2=-1/PAD, real values start at 3.
@@ -85,6 +88,7 @@ def index_mapping_small() -> Dict[str, Dict[Any, int]]:
 # ---------------------------------------------------------------------------
 # Data fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_interactions_df() -> pd.DataFrame:
@@ -105,6 +109,7 @@ def sample_interactions_df() -> pd.DataFrame:
 # Output directory fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def tmp_task_dir(tmp_path):
     """A scratch directory that looks like a Luigi task output dir.
@@ -122,9 +127,11 @@ def tmp_task_dir(tmp_path):
 # Tiny nn.Module fixture (for Lightning / optimizer tests)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def dummy_torch_module() -> nn.Module:
     """Linear 4→1 model with sigmoid — gradients flow, params are trainable."""
+
     class _Dummy(nn.Module):
         def __init__(self):
             super().__init__()

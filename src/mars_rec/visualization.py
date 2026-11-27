@@ -24,6 +24,7 @@ Models can override the role/heuristic system by implementing::
             "annotations": [(block_or_feature_name, "prose"), ...],
         }
 """
+
 from __future__ import annotations
 
 import glob
@@ -86,31 +87,31 @@ BLOCK_ROLES = {
 # Hex palette (no alpha; renderer applies opacity).
 ROLE_COLORS = {
     # features
-    "seq_id":       "#4A90D9",
-    "user_cf":      "#4A90D9",
+    "seq_id": "#4A90D9",
+    "user_cf": "#4A90D9",
     "user_profile": "#3498DB",
-    "content":      "#2ECC71",
-    "text":         "#3498DB",
-    "target":       "#E74C3C",
-    "goal":         "#2ECC71",
-    "temporal":     "#F39C12",
-    "scalar":       "#95A5A6",
-    "categorical":  "#4A90D9",
-    "mood":         "#9B59B6",
-    "session":      "#9B59B6",
-    "tag":          "#E67E22",
-    "other":        "#95A5A6",
+    "content": "#2ECC71",
+    "text": "#3498DB",
+    "target": "#E74C3C",
+    "goal": "#2ECC71",
+    "temporal": "#F39C12",
+    "scalar": "#95A5A6",
+    "categorical": "#4A90D9",
+    "mood": "#9B59B6",
+    "session": "#9B59B6",
+    "tag": "#E67E22",
+    "other": "#95A5A6",
     # blocks
-    "embedding":    "#4A90D9",
-    "projection":   "#7F8C8D",
-    "fusion":       "#E8D44D",
-    "attention":    "#4A90D9",
-    "rnn":          "#4A90D9",
-    "conv":         "#2ECC71",
-    "mlp":          "#7F8C8D",
-    "gate":         "#E8D44D",
-    "output":       "#17A2B8",
-    "norm":         "#BDC3C7",
+    "embedding": "#4A90D9",
+    "projection": "#7F8C8D",
+    "fusion": "#E8D44D",
+    "attention": "#4A90D9",
+    "rnn": "#4A90D9",
+    "conv": "#2ECC71",
+    "mlp": "#7F8C8D",
+    "gate": "#E8D44D",
+    "output": "#17A2B8",
+    "norm": "#BDC3C7",
 }
 
 # Used by print_text_summary
@@ -128,6 +129,7 @@ IOTYPE_LABELS = {
 # Dataclasses (IR)
 # =============================================================================
 
+
 @dataclass
 class FeatureGroup:
     """IR node: a labelled bundle of input columns rendered as one box."""
@@ -135,9 +137,9 @@ class FeatureGroup:
     label: str
     role: str
     columns: List[str]
-    shape: str = ""           # e.g. "[B]", "[B, L]", "[B, K]"
-    starred: bool = False     # ★ — feeds a gated residual or special path
-    disabled: bool = False    # off by default for this run
+    shape: str = ""  # e.g. "[B]", "[B, L]", "[B, K]"
+    starred: bool = False  # ★ — feeds a gated residual or special path
+    disabled: bool = False  # off by default for this run
 
 
 @dataclass
@@ -161,7 +163,7 @@ class Edge:
     src: str
     dst: str
     shape: str = ""
-    kind: str = "solid"       # solid | dashed | gated
+    kind: str = "solid"  # solid | dashed | gated
 
 
 @dataclass
@@ -195,6 +197,7 @@ class ModelIR:
 # =============================================================================
 # Helpers
 # =============================================================================
+
 
 def _fmt_params(n: int) -> str:
     """Compact param count, e.g. ``"1.5M"`` / ``"3.2K"`` / ``"42"``."""
@@ -236,10 +239,7 @@ def _fmt_shape(s: Any) -> str:
     if s is None:
         return ""
     if isinstance(s, list) and s and isinstance(s[0], (int, type(None))):
-        dims = [
-            "B" if i == 0 else (str(d) if d is not None else "?")
-            for i, d in enumerate(s)
-        ]
+        dims = ["B" if i == 0 else (str(d) if d is not None else "?") for i, d in enumerate(s)]
         return "[" + ", ".join(dims) + "]"
     if isinstance(s, list):
         parts = [_fmt_shape(v) for v in s]
@@ -344,6 +344,7 @@ def _infer_shape(
 # Feature grouping
 # =============================================================================
 
+
 def _group_features_by_role(
     columns: List[Column],
     role_overrides: Dict[str, str],
@@ -385,9 +386,19 @@ def _group_features_by_role(
         )
 
     role_order = {
-        "seq_id": 0, "content": 1, "user_cf": 2, "user_profile": 3,
-        "text": 4, "goal": 5, "target": 6, "mood": 7, "tag": 8,
-        "session": 9, "temporal": 10, "categorical": 11, "scalar": 12,
+        "seq_id": 0,
+        "content": 1,
+        "user_cf": 2,
+        "user_profile": 3,
+        "text": 4,
+        "goal": 5,
+        "target": 6,
+        "mood": 7,
+        "tag": 8,
+        "session": 9,
+        "temporal": 10,
+        "categorical": 11,
+        "scalar": 12,
         "other": 99,
     }
     groups.sort(key=lambda g: (role_order.get(g.role, 99), not g.starred, g.label))
@@ -436,11 +447,13 @@ def _group_features_legacy(columns: List[Column]) -> List[dict]:
 
         if merged_singles:
             if len(merged_singles) >= 3:
-                groups.append({
-                    "label": f"{IOTYPE_LABELS.get(io_type, str(io_type))} ({len(merged_singles)})",
-                    "columns": merged_singles,
-                    "type": io_type,
-                })
+                groups.append(
+                    {
+                        "label": f"{IOTYPE_LABELS.get(io_type, str(io_type))} ({len(merged_singles)})",
+                        "columns": merged_singles,
+                        "type": io_type,
+                    }
+                )
             else:
                 for col in merged_singles:
                     groups.append({"label": col.name, "columns": [col], "type": io_type})
@@ -460,6 +473,7 @@ def _group_features_legacy(columns: List[Column]) -> List[dict]:
 # =============================================================================
 # Block detection
 # =============================================================================
+
 
 def _detect_blocks(
     model: nn.Module,
@@ -527,8 +541,7 @@ def _detect_blocks(
         frozen_count = sum(1 for _, e in members if not e.weight.requires_grad)
         all_frozen = frozen_count == len(members)
         member_labels = [
-            f"{n}: {e.num_embeddings}×{e.embedding_dim}"
-            + (" ❄" if not e.weight.requires_grad else "")
+            f"{n}: {e.num_embeddings}×{e.embedding_dim}" + (" ❄" if not e.weight.requires_grad else "")
             for n, e in members[:5]
         ]
         if len(members) > 5:
@@ -559,6 +572,7 @@ def _detect_blocks(
 # =============================================================================
 # Forward-pass tracing
 # =============================================================================
+
 
 def _build_synthetic_batch(
     project_config: ProjectConfig,
@@ -611,8 +625,11 @@ def trace_model_shapes(
     the failure point.
     """
     inputs = _build_synthetic_batch(
-        project_config, index_mapping, model=model,
-        batch_size=batch_size, device=device,
+        project_config,
+        index_mapping,
+        model=model,
+        batch_size=batch_size,
+        device=device,
     )
 
     shapes: Dict[str, Dict[str, Any]] = {}
@@ -626,6 +643,7 @@ def trace_model_shapes(
                 "out": _shape_of(out),
             }
             order.append(name)
+
         return hook
 
     for name, m in model.named_modules():
@@ -851,8 +869,12 @@ class _NodePos:
 # SVG primitives
 # =============================================================================
 
+
 def _pill(
-    x: float, y: float, w: float, h: float,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
     label: str,
     color: str,
     starred: bool = False,
@@ -874,20 +896,23 @@ def _pill(
     else:
         label_y = y + h / 2 + 4
     return (
-        f'<g>'
+        f"<g>"
         f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="6" '
         f'fill="{color}" fill-opacity="{opacity_fill}" '
         f'stroke="{color}" stroke-width="1.2" stroke-opacity="{opacity_stroke}"/>'
         f'<text x="{x + w / 2:.1f}" y="{label_y:.1f}" text-anchor="middle" '
         f'font-size="10" font-weight="600" fill="{text_color}">'
-        f'{_esc(label)}{star}</text>'
-        f'{sub_text}'
-        f'</g>'
+        f"{_esc(label)}{star}</text>"
+        f"{sub_text}"
+        f"</g>"
     )
 
 
 def _block_box(
-    x: float, y: float, w: float, h: float,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
     title: str,
     role: str,
     sub_lines: List[str],
@@ -905,20 +930,25 @@ def _block_box(
             f'text-anchor="middle" font-size="9" fill="#555">{_esc(line)}</text>'
         )
     return (
-        f'<g>'
+        f"<g>"
         f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="8" '
         f'fill="{color}" fill-opacity="{fill_strength}" '
         f'stroke="{color}" stroke-width="1.4"/>'
         f'<text x="{x + w / 2:.1f}" y="{y + 15:.1f}" text-anchor="middle" '
         f'font-size="11" font-weight="700" fill="#222">{_esc(title_with_freeze)}</text>'
-        f'{sub_svg}'
-        f'</g>'
+        f"{sub_svg}"
+        f"</g>"
     )
 
 
 def _arrow(
-    x1: float, y1: float, x2: float, y2: float,
-    label: str = "", kind: str = "solid", color: str = "#666",
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    label: str = "",
+    kind: str = "solid",
+    color: str = "#666",
 ) -> str:
     dash = ' stroke-dasharray="4,3"' if kind == "dashed" else ""
     if kind == "gated":
@@ -928,19 +958,19 @@ def _arrow(
         mx = (x1 + x2) / 2 + 10
         my = (y1 + y2) / 2 + 3
         label_svg = (
-            f'<text x="{mx:.1f}" y="{my:.1f}" font-size="9" font-style="italic" '
-            f'fill="#666">{_esc(label)}</text>'
+            f'<text x="{mx:.1f}" y="{my:.1f}" font-size="9" font-style="italic" fill="#666">{_esc(label)}</text>'
         )
     return (
         f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
         f'stroke="{color}" stroke-width="1.2"{dash} marker-end="url(#arrowhead)"/>'
-        f'{label_svg}'
+        f"{label_svg}"
     )
 
 
 # =============================================================================
 # SVG layout
 # =============================================================================
+
 
 def _layout_feature_strip(
     groups: List[FeatureGroup],
@@ -979,8 +1009,7 @@ def _layout_feature_strip(
         color = ROLE_COLORS.get(g.role, "#999")
         sub = g.shape if g.shape else None
         fragments.append(
-            _pill(x, y_pill, pill_w, PILL_HEIGHT, g.label, color,
-                  starred=g.starred, disabled=g.disabled, sub=sub)
+            _pill(x, y_pill, pill_w, PILL_HEIGHT, g.label, color, starred=g.starred, disabled=g.disabled, sub=sub)
         )
         positions[g.label] = _NodePos(x, y_pill, pill_w, PILL_HEIGHT)
 
@@ -1013,16 +1042,14 @@ def _layout_backbone(
         title = _ROLE_TITLES.get(role, role.title())
 
         fragments.append(
-            f'<text x="{MARGIN_X}" y="{y + 12}" font-size="10" font-weight="700" '
-            f'fill="{color}">{_esc(title)}</text>'
+            f'<text x="{MARGIN_X}" y="{y + 12}" font-size="10" font-weight="700" fill="{color}">{_esc(title)}</text>'
         )
         y += 18
 
         n = len(members)
         per_row = min(n, 4)
         total_w = canvas_width - 2 * MARGIN_X
-        block_w = max(BLOCK_WIDTH_NARROW, min(BLOCK_WIDTH_WIDE,
-                      (total_w - (per_row - 1) * BLOCK_GAP) / per_row))
+        block_w = max(BLOCK_WIDTH_NARROW, min(BLOCK_WIDTH_WIDE, (total_w - (per_row - 1) * BLOCK_GAP) / per_row))
         rows = (n + per_row - 1) // per_row
         for i, blk in enumerate(members):
             row = i // per_row
@@ -1046,9 +1073,15 @@ def _layout_backbone(
 
             fragments.append(
                 _block_box(
-                    x, y_blk, block_w, BLOCK_HEIGHT,
-                    title=blk.label, role=role, sub_lines=sub_lines,
-                    color=color, frozen=blk.frozen,
+                    x,
+                    y_blk,
+                    block_w,
+                    BLOCK_HEIGHT,
+                    title=blk.label,
+                    role=role,
+                    sub_lines=sub_lines,
+                    color=color,
+                    frozen=blk.frozen,
                     fill_strength=0.28 if role in ("attention", "rnn") else 0.18,
                 )
             )
@@ -1084,18 +1117,13 @@ def _connect_backbone(
         if b.name not in positions:
             continue
         p = positions[b.name]
-        fragments.append(
-            _arrow(feature_anchor_x, feature_anchor_y, p.cx, p.top - 2,
-                   kind="dashed", color="#AAA")
-        )
+        fragments.append(_arrow(feature_anchor_x, feature_anchor_y, p.cx, p.top - 2, kind="dashed", color="#AAA"))
 
     for i in range(len(stages) - 1):
         _, prev_blocks = stages[i]
         _, next_blocks = stages[i + 1]
-        prev_centers = [(positions[b.name].cx, positions[b.name].bottom)
-                        for b in prev_blocks if b.name in positions]
-        next_tops = [(positions[b.name].cx, positions[b.name].top)
-                     for b in next_blocks if b.name in positions]
+        prev_centers = [(positions[b.name].cx, positions[b.name].bottom) for b in prev_blocks if b.name in positions]
+        next_tops = [(positions[b.name].cx, positions[b.name].top) for b in next_blocks if b.name in positions]
         if not prev_centers or not next_tops:
             continue
         if len(prev_centers) == 1 and len(next_tops) == 1:
@@ -1125,8 +1153,7 @@ def _legend(
 ) -> Tuple[List[str], float]:
     fragments = []
     fragments.append(
-        f'<text x="{MARGIN_X}" y="{y_start + 14}" font-size="10" font-weight="700" '
-        f'fill="#333">Legend</text>'
+        f'<text x="{MARGIN_X}" y="{y_start + 14}" font-size="10" font-weight="700" fill="#333">Legend</text>'
     )
     y = y_start + 20
     x = MARGIN_X
@@ -1144,17 +1171,15 @@ def _legend(
             f'<rect x="{x}" y="{y - swatch_h + 2}" width="{swatch_w}" height="{swatch_h}" '
             f'rx="2" fill="{color}" fill-opacity="0.35"/>'
         )
-        fragments.append(
-            f'<text x="{x + swatch_w + 4}" y="{y + 1}" font-size="9" fill="#555">{_esc(label)}</text>'
-        )
+        fragments.append(f'<text x="{x + swatch_w + 4}" y="{y + 1}" font-size="9" fill="#555">{_esc(label)}</text>')
         x += swatch_w + 4 + text_w + pad * 2
 
     y += 18
     fragments.append(
         f'<text x="{MARGIN_X}" y="{y}" font-size="9" fill="#666" font-style="italic">'
-        f'★ = injected as gated residual / special path  ·  '
-        f'❄ = frozen parameters  ·  '
-        f'greyed pill = disabled by default</text>'
+        f"★ = injected as gated residual / special path  ·  "
+        f"❄ = frozen parameters  ·  "
+        f"greyed pill = disabled by default</text>"
     )
     return fragments, y + 10
 
@@ -1162,6 +1187,7 @@ def _legend(
 # =============================================================================
 # SVG render
 # =============================================================================
+
 
 def render_svg_flow(ir: ModelIR, output_path: str) -> str:
     """Render the IR as an SVG flow diagram and write to ``output_path``."""
@@ -1179,7 +1205,9 @@ def render_svg_flow(ir: ModelIR, output_path: str) -> str:
     y += TITLE_HEIGHT
 
     feat_fragments, _feat_positions, y = _layout_feature_strip(
-        ir.feature_groups, y, CANVAS_WIDTH,
+        ir.feature_groups,
+        y,
+        CANVAS_WIDTH,
     )
     fragments.extend(feat_fragments)
     y += 16
@@ -1188,11 +1216,16 @@ def render_svg_flow(ir: ModelIR, output_path: str) -> str:
     feature_bus_x = CANVAS_WIDTH / 2
 
     bb_fragments, bb_positions, y_after_backbone = _layout_backbone(
-        ir.blocks, y, CANVAS_WIDTH,
+        ir.blocks,
+        y,
+        CANVAS_WIDTH,
     )
 
     arrow_fragments = _connect_backbone(
-        ir.blocks, bb_positions, feature_bus_x, feature_bus_y,
+        ir.blocks,
+        bb_positions,
+        feature_bus_x,
+        feature_bus_y,
     )
     fragments.extend(arrow_fragments)
     fragments.extend(bb_fragments)
@@ -1229,16 +1262,14 @@ def render_svg_flow(ir: ModelIR, output_path: str) -> str:
         f'viewBox="0 0 {CANVAS_WIDTH} {total_height}" '
         f'role="img" '
         f'style="font-family: system-ui, -apple-system, sans-serif;">\n'
-        f'  <title>{_esc(ir.title)} — architecture</title>\n'
-        f'  <desc>{_esc(ir.subtitle)}</desc>\n'
-        f'  <defs>\n'
+        f"  <title>{_esc(ir.title)} — architecture</title>\n"
+        f"  <desc>{_esc(ir.subtitle)}</desc>\n"
+        f"  <defs>\n"
         f'    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">\n'
         f'      <path d="M0,0 L8,3 L0,6" fill="#666"/>\n'
-        f'    </marker>\n'
-        f'  </defs>\n'
-        f'  <rect width="100%" height="100%" fill="white"/>\n  '
-        + "\n  ".join(fragments)
-        + "\n</svg>\n"
+        f"    </marker>\n"
+        f"  </defs>\n"
+        f'  <rect width="100%" height="100%" fill="white"/>\n  ' + "\n  ".join(fragments) + "\n</svg>\n"
     )
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
@@ -1250,6 +1281,7 @@ def render_svg_flow(ir: ModelIR, output_path: str) -> str:
 # =============================================================================
 # Text summary
 # =============================================================================
+
 
 def introspect_model(model: nn.Module) -> List[dict]:
     """Walk ``model.named_modules()`` and extract one row per layer."""
@@ -1263,13 +1295,15 @@ def introspect_model(model: nn.Module) -> List[dict]:
                 n_children = sum(1 for _ in module.children())
                 child_classes = set(c.__class__.__name__ for c in module.children())
                 child_label = "/".join(child_classes) if child_classes else "?"
-                layers.append({
-                    "name": name,
-                    "class_name": f"{cls}[{child_label} x{n_children}]",
-                    "params": sum(p.numel() for p in module.parameters()),
-                    "details": f"{n_children} sub-modules",
-                    "is_container": True,
-                })
+                layers.append(
+                    {
+                        "name": name,
+                        "class_name": f"{cls}[{child_label} x{n_children}]",
+                        "params": sum(p.numel() for p in module.parameters()),
+                        "details": f"{n_children} sub-modules",
+                        "is_container": True,
+                    }
+                )
             continue
 
         cls = module.__class__.__name__
@@ -1293,13 +1327,15 @@ def introspect_model(model: nn.Module) -> List[dict]:
         elif isinstance(module, nn.Dropout):
             details = f"p={module.p}"
 
-        layers.append({
-            "name": name,
-            "class_name": cls,
-            "params": n_params,
-            "details": details,
-            "is_container": False,
-        })
+        layers.append(
+            {
+                "name": name,
+                "class_name": cls,
+                "params": n_params,
+                "details": details,
+                "is_container": False,
+            }
+        )
 
     return layers
 
@@ -1325,11 +1361,7 @@ def print_text_summary(
     print("=" * width)
     print(f"  Model: {model_cls}")
     print(f"  Loss:  {loss_fn}")
-    print(
-        f"  Params: {_fmt_params(total)} total | "
-        f"{_fmt_params(trainable)} trainable | "
-        f"{_fmt_params(frozen)} frozen"
-    )
+    print(f"  Params: {_fmt_params(total)} total | {_fmt_params(trainable)} trainable | {_fmt_params(frozen)} frozen")
     if extra:
         print(f"  Extra:  {json.dumps(extra, indent=None)}")
     print("=" * width)
@@ -1384,6 +1416,7 @@ def print_text_summary(
 # Loading
 # =============================================================================
 
+
 def load_model_from_task(
     task_dir: str,
     device: str = "cpu",
@@ -1417,10 +1450,7 @@ def load_model_from_task(
         if ckpt_files:
             ckpt_path = max(ckpt_files, key=os.path.getmtime)
             checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
-            state_dict = {
-                k.replace("module.", ""): v
-                for k, v in checkpoint["state_dict"].items()
-            }
+            state_dict = {k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()}
             model.load_state_dict(state_dict)
 
     model.eval()
@@ -1430,6 +1460,7 @@ def load_model_from_task(
 # =============================================================================
 # Public entry point
 # =============================================================================
+
 
 def generate_architecture_diagram(
     model: nn.Module,
@@ -1454,12 +1485,16 @@ def generate_architecture_diagram(
         else:
             try:
                 trace_data = trace_model_shapes(
-                    model, project_config, index_mapping, device=device,
+                    model,
+                    project_config,
+                    index_mapping,
+                    device=device,
                 )
                 if trace_data.get("error"):
                     logger.warning(
                         "Partial trace captured (%d modules): %s",
-                        len(trace_data.get("shapes", {})), trace_data["error"],
+                        len(trace_data.get("shapes", {})),
+                        trace_data["error"],
                     )
             except Exception:
                 logger.warning(

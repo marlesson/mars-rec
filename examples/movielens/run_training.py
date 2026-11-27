@@ -6,6 +6,7 @@ Usage:
     cd <project-root>
     PYTHONPATH=src:. python examples/movielens/run_training.py
 """
+
 import os
 import sys
 

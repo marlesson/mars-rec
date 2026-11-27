@@ -12,6 +12,7 @@ The downstream framework (training.py) relies on the exact shape of
 ``output()`` to wire the requires() chain; if that contract drifts,
 every project's training breaks.
 """
+
 from __future__ import annotations
 
 import os
@@ -47,11 +48,13 @@ class _MiniPrep(BasePrepareDataFrames):
 
     def read_data_frame(self):
         # 30 rows × 3 columns — small but enough to split.
-        return pd.DataFrame({
-            "user_id": list(range(30)),
-            "item_id": list(range(100, 130)),
-            "label": [i % 2 for i in range(30)],
-        })
+        return pd.DataFrame(
+            {
+                "user_id": list(range(30)),
+                "item_id": list(range(100, 130)),
+                "label": [i % 2 for i in range(30)],
+            }
+        )
 
     def transform_data_frame(self, df, data_key):
         # Record the data_key per call for the test that inspects it.
@@ -65,12 +68,14 @@ class _MiniPrep(BasePrepareDataFrames):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestBasePrepareDataFramesRun:
     def test_run_creates_train_val_test_outputs(self, tmp_path):
         out_dir = tmp_path / "ds"
         task = _MiniPrep(
             dataset_dir_param=str(out_dir),
-            test_size=0.2, val_size=0.2,
+            test_size=0.2,
+            val_size=0.2,
             dataset_split_method="holdout",
             test_split_type="random",
             item_column="item_id",
@@ -89,7 +94,8 @@ class TestBasePrepareDataFramesRun:
         out_dir = tmp_path / "ds"
         task = _MiniPrep(
             dataset_dir_param=str(out_dir),
-            test_size=0.2, val_size=0.25,
+            test_size=0.2,
+            val_size=0.25,
             dataset_split_method="holdout",
             test_split_type="random",
             item_column="item_id",
@@ -115,7 +121,8 @@ class TestBasePrepareDataFramesRun:
         log.touch()  # OptionalParameter("") would skip the log
         task = _MiniPrep(
             dataset_dir_param=str(out_dir),
-            test_size=0.2, val_size=0.2,
+            test_size=0.2,
+            val_size=0.2,
             dataset_split_method="holdout",
             test_split_type="random",
             item_column="item_id",
@@ -141,11 +148,13 @@ class TestSplitHelpers:
             item_column="item_id",
             seed=0,
         )
-        df = pd.DataFrame({
-            "user_id": list(range(20)),
-            "item_id": list(range(100, 120)),
-            "label": [i % 2 for i in range(20)],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": list(range(20)),
+                "item_id": list(range(100, 120)),
+                "label": [i % 2 for i in range(20)],
+            }
+        )
         train_df, test_df = task.random_train_test_split(df, test_size=0.25)
         assert len(test_df) == 5
         assert len(train_df) == 15
@@ -179,9 +188,11 @@ class TestCreateAvailableItems:
             available_items_column_name="avail",
             seed=0,
         )
-        df = pd.DataFrame({
-            "item_id": [1, 2, 3, 4, 5],
-        })
+        df = pd.DataFrame(
+            {
+                "item_id": [1, 2, 3, 4, 5],
+            }
+        )
         task.create_available_items(df)
         assert "avail" in df.columns
         # Each row's available_items must include the row's own item id.
@@ -195,10 +206,12 @@ class TestCreateAvailableItems:
             available_items_column_name="avail",
             seed=0,
         )
-        df = pd.DataFrame({
-            "item_id": [1, 2],
-            "avail": [[1, 2, 3], [4, 5]],
-        })
+        df = pd.DataFrame(
+            {
+                "item_id": [1, 2],
+                "avail": [[1, 2, 3], [4, 5]],
+            }
+        )
         original_avail = df["avail"].tolist()
         task.create_available_items(df)
         # Column kept as-is (no modification).

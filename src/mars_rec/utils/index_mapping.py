@@ -15,6 +15,7 @@ constructs ``nn.Embedding`` with ``num_embeddings = n_items + 3``
 (or just uses ``max(mapping.values()) + 1`` as :class:`RecommenderModule`
 does internally).
 """
+
 import functools
 from collections import defaultdict
 from typing import Dict, Any, List, Iterable
@@ -39,9 +40,7 @@ def create_index_mapping(
     The ``include_none`` flag prepends the ``None`` / ``-1`` sentinel
     slots (1 and 2) used by sequence padding.
     """
-    indexable_values = list(
-        sorted(set(str(value) for value in indexable_values if not pd.isnull(value)))
-    )
+    indexable_values = list(sorted(set(str(value) for value in indexable_values if not pd.isnull(value))))
     if include_none:
         indexable_values = [None, -1] + indexable_values
 
@@ -54,7 +53,7 @@ def create_index_mapping(
 
     if include_none:
         mapping[np.nan] = 1  # Both None and nan are treated the same
-        mapping["-1"]   = 2  # Both pad -1 and "-1"
+        mapping["-1"] = 2  # Both pad -1 and "-1"
 
     return mapping
 
@@ -80,7 +79,9 @@ def map_array(values: list, mapping: dict) -> List[int]:
 
 
 def transform_with_indexing(
-    df: pd.DataFrame, index_mapping: Dict[str, dict], project_config: ProjectConfig,
+    df: pd.DataFrame,
+    index_mapping: Dict[str, dict],
+    project_config: ProjectConfig,
 ):
     """Rewrite every ``INDEXABLE`` / ``INDEXABLE_ARRAY`` column to its int ids.
 

@@ -25,6 +25,7 @@ Top-level entry points:
 See ``examples/`` for end-to-end projects (MovieLens, Last.fm,
 Online Retail, Amazon Beauty, MovieLens-100K slate ranking).
 """
-__version__ = '0.1.0'
 
-import mars_rec.torch.metrics
+__version__ = "0.1.0"
+
+import mars_rec.torch.metrics  # noqa: F401  (side effect: populates METRIC_REGISTRY)

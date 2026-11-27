@@ -40,11 +40,13 @@ def index_mapping():
 
 @pytest.fixture
 def sample_df():
-    return pd.DataFrame({
-        "user_id": [1, 2, 3, 1, 2],
-        "item_id": [10, 20, 30, 20, 10],
-        "clicked": [1.0, 0.0, 1.0, 1.0, 0.0],
-    })
+    return pd.DataFrame(
+        {
+            "user_id": [1, 2, 3, 1, 2],
+            "item_id": [10, 20, 30, 20, 10],
+            "clicked": [1.0, 0.0, 1.0, 1.0, 0.0],
+        }
+    )
 
 
 class TestPreprocessInteractionsDataFrame:
@@ -83,12 +85,14 @@ class TestPreprocessInteractionsDataFrame:
             other_input_columns=[float_col],
             output_column=Column("clicked", IOType.NUMBER),
         )
-        df = pd.DataFrame({
-            "user_id": [1],
-            "item_id": [10],
-            "features": ["[1.0, 2.0, 3.0]"],
-            "clicked": [1.0],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": [1],
+                "item_id": [10],
+                "features": ["[1.0, 2.0, 3.0]"],
+                "clicked": [1.0],
+            }
+        )
         result = preprocess_interactions_data_frame(df, config)
         assert isinstance(result["features"].iloc[0], list)
         assert result["features"].iloc[0] == [1.0, 2.0, 3.0]
@@ -106,12 +110,14 @@ class TestPreprocessInteractionsDataFrame:
             other_input_columns=[int_col],
             output_column=Column("clicked", IOType.NUMBER),
         )
-        df = pd.DataFrame({
-            "user_id": [1],
-            "item_id": [10],
-            "ids": ["[10, 20, 30]"],
-            "clicked": [1.0],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": [1],
+                "item_id": [10],
+                "ids": ["[10, 20, 30]"],
+                "clicked": [1.0],
+            }
+        )
         result = preprocess_interactions_data_frame(df, config)
         assert isinstance(result["ids"].iloc[0], list)
         assert result["ids"].iloc[0] == [10, 20, 30]
@@ -129,12 +135,14 @@ class TestPreprocessInteractionsDataFrame:
             other_input_columns=[float_col],
             output_column=Column("clicked", IOType.NUMBER),
         )
-        df = pd.DataFrame({
-            "user_id": [1],
-            "item_id": [10],
-            "features": [[1.0, 2.0, 3.0]],
-            "clicked": [1.0],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": [1],
+                "item_id": [10],
+                "features": [[1.0, 2.0, 3.0]],
+                "clicked": [1.0],
+            }
+        )
         result = preprocess_interactions_data_frame(df, config)
         assert result["features"].iloc[0] == [1.0, 2.0, 3.0]
 
@@ -158,13 +166,15 @@ class TestPreprocessInteractionsDataFrame:
             other_input_columns=[float_col, int_col],
             output_column=Column("clicked", IOType.NUMBER),
         )
-        df = pd.DataFrame({
-            "user_id": [1],
-            "item_id": [10],
-            "features": ["[1.0, 2.0]"],
-            "ids": ["[10, 20]"],
-            "clicked": [1.0],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": [1],
+                "item_id": [10],
+                "features": ["[1.0, 2.0]"],
+                "ids": ["[10, 20]"],
+                "clicked": [1.0],
+            }
+        )
         result = preprocess_interactions_data_frame(df, config)
         assert result["features"].iloc[0] == [1.0, 2.0]
         assert result["ids"].iloc[0] == [10, 20]
@@ -216,10 +226,12 @@ class TestLiteralEvalArrayColumns:
         assert df["features"].iloc[0] == [1.0, 2.0]
 
     def test_multiple_columns_processed(self):
-        df = pd.DataFrame({
-            "a": ["[1, 2]", "[3, 4]"],
-            "b": ["[5.0]", "[6.0]"],
-        })
+        df = pd.DataFrame(
+            {
+                "a": ["[1, 2]", "[3, 4]"],
+                "b": ["[5.0]", "[6.0]"],
+            }
+        )
         columns = [Column("a", IOType.INT_ARRAY), Column("b", IOType.FLOAT_ARRAY)]
         literal_eval_array_columns(df, columns)
         assert df["a"].iloc[0] == [1, 2]
@@ -273,12 +285,14 @@ class TestInteractionsDataset:
             output_column=Column("clicked", IOType.NUMBER),
             auxiliar_output_columns=[aux_col],
         )
-        df = pd.DataFrame({
-            "user_id": [1, 2],
-            "item_id": [10, 20],
-            "clicked": [1.0, 0.0],
-            "weight": [0.5, 0.8],
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": [1, 2],
+                "item_id": [10, 20],
+                "clicked": [1.0, 0.0],
+                "weight": [0.5, 0.8],
+            }
+        )
         mapping = {
             "user_id": defaultdict(int, {"1": 1, "2": 2}),
             "item_id": defaultdict(int, {"10": 1, "20": 2}),
@@ -304,14 +318,14 @@ class TestInteractionsDataset:
         )
         # Create metadata embeddings indexed from 0
         # NON_UTIL_UID=3, so embeddings need padding for first 3 rows
-        embeddings_for_metadata = {
-            "item_feat": np.array([[0, 0], [0, 0], [0, 0], [1.0, 2.0], [3.0, 4.0]])
-        }
-        df = pd.DataFrame({
-            "user_id": [1, 2],
-            "item_id": [3, 4],  # item indices matching embedding rows
-            "clicked": [1.0, 0.0],
-        })
+        embeddings_for_metadata = {"item_feat": np.array([[0, 0], [0, 0], [0, 0], [1.0, 2.0], [3.0, 4.0]])}
+        df = pd.DataFrame(
+            {
+                "user_id": [1, 2],
+                "item_id": [3, 4],  # item indices matching embedding rows
+                "clicked": [1.0, 0.0],
+            }
+        )
         mapping = {
             "user_id": defaultdict(int, {"1": 1, "2": 2}),
             "item_id": defaultdict(int, {"3": 3, "4": 4}),
@@ -372,7 +386,6 @@ class TestInteractionsWithNegativeItemGenerationDataset:
         dataset = InteractionsWithNegativeItemGenerationDataset(
             sample_df, None, project_config, index_mapping, negative_proportion=0.5
         )
-        n = 5  # original dataset length
         # Access positive samples (indices 0..n-1)
         _, output = dataset[[0, 1, 2, 3, 4]]
         # Positive outputs should match original labels
