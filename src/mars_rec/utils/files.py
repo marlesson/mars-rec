@@ -4,7 +4,7 @@ Every training run writes its outputs under a stable layout::
 
     OUTPUT_PATH/models/<TaskClass>/results/<task_id>/
         params.json              # Luigi parameters this run was launched with
-        weights.pt               # Trained model checkpoint
+        weights.ckpt             # Lightning checkpoint (weights-v1.ckpt, ... on re-runs)
         history.csv              # Per-epoch metrics
         metadata.json            # Post-training ranking / ROC-AUC metrics
         test_set_predictions.csv # Per-test-row predictions
@@ -42,7 +42,13 @@ def get_params(task_dir: str) -> dict:
 
 
 def get_weights_path(task_dir: str) -> str:
-    """Path to the PyTorch checkpoint produced by the training task."""
+    """Legacy path ``<task_dir>/weights.pt``.
+
+    Training now writes Lightning checkpoints named ``weights*.ckpt``; the
+    framework locates them with ``glob`` (see
+    :meth:`mars_rec.simulation.training.TorchModelTraining.get_trained_module`).
+    Kept for backwards compatibility with external callers.
+    """
     return os.path.join(task_dir, "weights.pt")
 
 

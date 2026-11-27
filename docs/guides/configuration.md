@@ -24,6 +24,7 @@ The `Makefile` loads `.env` automatically. You can also override a value per inv
 | `LUIGI_CONFIG_PATH` | the package's `luigi.cfg` | Set automatically by the CLI |
 | `PYTHONPATH` | — | Must include the directory that contains your project package |
 | `PYTHONHASHSEED` | set to `seed` at runtime | Reproducibility |
+| `CUDA_VISIBLE_DEVICES` | all GPUs | Which GPU `--device cuda` trains on (it always uses the first visible one) |
 
 ## Read by the build tooling
 

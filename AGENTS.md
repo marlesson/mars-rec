@@ -170,9 +170,14 @@ The expected `forward()` output depends on the loss function:
 
 | Loss | Output shape | Notes |
 |---|---|---|
-| `bce`, `bce_logits`, `mse`, `nll` | `[batch_size]` | 1D scalar score per row |
-| `ce` | `[batch_size, n_items]` | Logits over the item vocabulary (next-item / sequence models) |
-| `focal_loss`, `implicit_feedback_bce`, `dummy` | `[batch_size]` | Same as BCE |
+| `bce`, `implicit_feedback_bce` | `[batch_size]` | Probabilities (apply `sigmoid` in the model) |
+| `bce_logits`, `bce_logits_smooth`, `focal_loss` | `[batch_size]` | Raw logits (in `_LOGIT_LOSSES`; metrics get `sigmoid(score)`) |
+| `bpr`, `ranknet`, `lambdarank` | `[batch_size]` | Raw logits; pairwise/listwise over the batch |
+| `mse`, `dummy` | `[batch_size]` | One score per row |
+| `ce`, `nll` | `[batch_size, n_items]` | Scores over the item vocabulary (next-item / sequence models) |
+| `infonce`, `cosine_similarity`, `hardneg_infonce` | embeddings | `EmbeddingRecommenderLightningModule` |
+
+The user-facing version of this table lives in `docs/concepts/models.md` — keep both in sync.
 
 For `[batch_size, 1]` outputs, add `.squeeze(-1)`:
 
@@ -236,7 +241,7 @@ All `list/results` lookups read `output/models/SupervisedModelTraining/results/<
 1. Create a file at `examples/my_project/model.py`
 2. Inherit from `RecommenderModule`
 3. Implement `__init__(self, project_config, index_mapping, **kwargs)` and `forward()`
-4. `forward()` must return shape `[batch_size]`
+4. `forward()` must return shape `[batch_size]` (`[batch_size, n_items]` for `ce` / `nll`)
 5. Pass extra params via `recommender_extra_params`
 
 ### Adding a new dataset

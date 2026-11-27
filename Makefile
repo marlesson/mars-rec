@@ -280,7 +280,7 @@ gcp-submit: _check_gcp
 ## Usage:
 ##   make vertex-run ARGS="--project examples.movielens.config.movielens \
 ##     --recommender-module-class examples.movielens.model.MovieLensNCF \
-##     --epochs 10 --batch-size 256 --device cuda:0 --no-cache"
+##     --epochs 10 --batch-size 256 --device cuda --no-cache"
 ##
 ## With GPU:
 ##   make vertex-run GPU_TYPE=NVIDIA_TESLA_T4 GPU_COUNT=1 MACHINE_TYPE=n1-standard-8 ARGS="..."

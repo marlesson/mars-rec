@@ -652,7 +652,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
     # return a 1-D tensor / numpy array of length ``len(train_dataset)``.
     # When set, the training sampler switches from uniform shuffle to
     # ``torch.multinomial`` over those weights — useful for matching a
-    # downstream regime (e.g. Blind-A's turn distribution). Default ""
+    # downstream evaluation distribution. Default ""
     # = legacy uniform shuffle.
     train_sample_weights_provider: str = luigi.Parameter(default="")
 
@@ -692,6 +692,12 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         return self.recommender_extra_params
 
     def create_module(self) -> nn.Module:
+        """Instantiate the model (``recommender_module_class``).
+
+        The class receives ``project_config``, ``index_mapping`` and every key of
+        ``recommender_extra_params`` as keyword arguments. Override to build the
+        model differently (e.g. to load pretrained weights).
+        """
         return self.module_class(
             project_config=self.project_config,
             index_mapping=self.index_mapping,
@@ -699,6 +705,13 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         )
 
     def train(self):
+        """Fit the model and write the run artifacts.
+
+        Builds the data loaders and the model, writes ``summary.txt``,
+        ``sample_train.csv`` and ``architecture.svg``, runs ``trainer.fit``, then
+        writes ``history.csv`` and ``plot_history.jpg`` and calls
+        :meth:`after_fit`, :meth:`evaluate` and the metadata/cleanup steps.
+        """
         self._train_start_time = time.time()
 
         if self.device == "cuda":
@@ -822,13 +835,16 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         self.cache_cleanup()
 
     def get_sample_batch(self):
+        """Return the inputs of the first training sample, used for ``summary.txt``."""
         return default_convert(self.train_dataset[0][0])
 
     def after_fit(self):
-        # Score the sample_train.csv rows with the trained model and persist
-        # sample_train_scores.csv. Required by downstream --val-prediction
-        # flows; safe no-op when sample_train.csv is absent. Subclasses that
-        # override after_fit should super() to preserve this behavior.
+        """Hook called right after ``trainer.fit``, before :meth:`evaluate`.
+
+        Scores the ``sample_train.csv`` rows and writes ``sample_train_scores.csv``
+        (a no-op when ``sample_train.csv`` is absent). Subclasses that override
+        it should call ``super().after_fit()`` to keep this behaviour.
+        """
         try:
             self._save_sample_train_scores()
         except Exception:  # noqa: BLE001 — log + continue, don't abort training
@@ -1002,6 +1018,12 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         return results[0] if results else {}
 
     def evaluate(self):
+        """Evaluate the trained model on the validation split.
+
+        Logs every metric of ``metrics`` and keeps the results for
+        ``metadata.json``. Test-set ranking metrics are computed earlier, in
+        :meth:`SupervisedModelTraining.after_fit`.
+        """
         self.cache_cleanup()
         val_loader = self.get_val_generator()
         banner("Evaluation (validation set)", logger=logger)
@@ -1013,6 +1035,12 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 logger.info("  %-28s %s", metric, value)
 
     def create_lightning_module(self, module: nn.Module) -> RecommenderLightningModule:
+        """Wrap ``module`` in a Lightning module with the configured loss, optimizer and scheduler.
+
+        Embedding losses (``infonce``, ``cosine_similarity``, ``hardneg_infonce``) select
+        :class:`mars_rec.torch.lightning_module.EmbeddingRecommenderLightningModule`;
+        every other loss uses :class:`mars_rec.torch.lightning_module.RecommenderLightningModule`.
+        """
         loss_fn = self._get_loss_function()
         optimizer = self._get_optimizer(module)
         lr_scheduler_config = self._get_lr_scheduler_config(optimizer)
@@ -1031,6 +1059,10 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         )
 
     def create_trainer(self, log_every_n_steps: int = 50) -> pl.Trainer:
+        """Build the ``pl.Trainer`` (callbacks, loggers, accelerator, precision).
+
+        Override to add Lightning callbacks or change trainer flags.
+        """
         callbacks = self._get_callbacks()
         loggers = self._get_loggers()
 
@@ -1174,6 +1206,10 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         epoch_df.to_csv(get_history_path(self.output().path), index=False)
 
     def get_trained_module(self) -> nn.Module:
+        """Rebuild the model and load the best ``weights*.ckpt`` of this run, in eval mode.
+
+        :raises FileNotFoundError: when the task directory has no checkpoint.
+        """
         module = self.create_module().to(self.torch_device)
 
         # Find Lightning checkpoint
@@ -1319,6 +1355,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         return func(self.train_dataset, self.train_data_frame)
 
     def get_train_generator(self) -> DataLoader:
+        """DataLoader over the training dataset (shuffled, or weighted by ``train_sample_weights_provider``)."""
         sample_weights = self._resolve_train_sample_weights()
         batch_sampler = FasterBatchSampler(
             self.train_dataset,
@@ -1334,6 +1371,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         )
 
     def get_val_generator(self) -> Optional[DataLoader]:
+        """DataLoader over the validation dataset, or ``None`` when the split is empty."""
         if len(self.val_data_frame) == 0:
             return None
         batch_sampler = FasterBatchSampler(self.val_dataset, self.batch_size, shuffle=False)
@@ -1345,6 +1383,7 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         )
 
     def get_test_generator(self) -> DataLoader:
+        """DataLoader over the test dataset (not shuffled)."""
         batch_sampler = FasterBatchSampler(self.test_dataset, self.batch_size, shuffle=False)
         return NoAutoCollationDataLoader(
             self.test_dataset,
@@ -2128,7 +2167,12 @@ class SupervisedModelTraining(TorchModelTraining):
         return results
 
     def after_fit(self):
-        # Preserve TorchModelTraining hooks (sample_train_scores).
+        """Run the base hook, then score the test split.
+
+        When ``test_size > 0`` it writes ``test_set_predictions.csv`` and, with
+        ``ranking_metrics=True``, computes NDCG / HitRate / MRR / MAP and ROC-AUC
+        for ``metadata.json``.
+        """
         super().after_fit()
         if self.test_size > 0:
             self._save_test_set_predictions()
