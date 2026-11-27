@@ -51,7 +51,7 @@ import time
 import warnings
 from contextlib import redirect_stdout
 from copy import deepcopy
-from typing import Type, Dict, List, Optional, Tuple, Any, cast
+from typing import Type, Dict, Iterable, List, Optional, Tuple, Any, cast
 import luigi
 import numpy as np
 import pandas as pd
@@ -421,7 +421,22 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
         ).drop_duplicates()
 
     def get_data_frame_interactions(self) -> pd.DataFrame:
-        return self.get_data_frame_for_indexing()
+        """Distinct raw ``(user, item)`` pairs of train + val.
+
+        Used to flag test rows whose pair was seen in training. Reads only
+        the two key columns, so array columns are never parsed here.
+        """
+        key_columns = [self.project_config.user_column.name, self.project_config.item_column.name]
+        return (
+            pd.concat(
+                [
+                    pd.read_csv(self.train_data_frame_path, usecols=key_columns),
+                    pd.read_csv(self.val_data_frame_path, usecols=key_columns),
+                ]
+            )
+            .drop_duplicates()
+            .reset_index(drop=True)
+        )
 
     @property
     def index_mapping_path(self) -> Optional[str]:
@@ -433,9 +448,6 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
     def index_mapping(self) -> Dict[str, Dict[Any, int]]:
         if not hasattr(self, "_index_mapping"):
             logger.info("Building index_mapping (path=%s)", self.index_mapping_path)
-
-            self._creating_index_mapping = True
-            df = preprocess_interactions_data_frame(self.get_data_frame_for_indexing(), self.project_config)
 
             if os.path.exists(self.index_mapping_path):
                 with open(self.index_mapping_path, "rb") as f:
@@ -454,6 +466,16 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
             new_array = [
                 c.name for c in project_all_columns if c.type == IOType.INDEXABLE_ARRAY and not c.same_index_as
             ]
+
+            # Reading and parsing train+val is the expensive part: skip it
+            # when the reused mapping already covers every indexable column.
+            self._creating_index_mapping = True
+            df = (
+                preprocess_interactions_data_frame(self.get_data_frame_for_indexing(), self.project_config)
+                if new_scalar or new_array
+                else None
+            )
+
             for column in project_all_columns:
                 if column.type == IOType.INDEXABLE and not column.same_index_as:
                     self._index_mapping[column.name] = create_index_mapping(df[column.name].values)
@@ -488,11 +510,21 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
 
     @property
     def reverse_index_mapping(self) -> Dict[str, Dict[int, Any]]:
-        rev = {key: {value_: key_ for key_, value_ in mapping.items()} for key, mapping in self.index_mapping.items()}
-        # add nothing 0
-        for key, mapping in self.index_mapping.items():
-            rev[key][0] = 0
-        return rev
+        """``{column: {int_index: raw_value}}``, the inverse of :attr:`index_mapping`.
+
+        Index ``0`` (unknown) maps back to ``0``. Built once per
+        ``index_mapping`` object: the candidate sampler reads it for every
+        test row, and rebuilding it each time costs O(catalog) per row.
+        """
+        index_mapping = self.index_mapping
+        cached = self.__dict__.get("_reverse_index_mapping_cache")
+        if cached is None or cached[0] is not index_mapping:
+            rev = {key: {value_: key_ for key_, value_ in mapping.items()} for key, mapping in index_mapping.items()}
+            for key in rev:
+                rev[key][0] = 0
+            cached = (index_mapping, rev)
+            self._reverse_index_mapping_cache = cached
+        return cached[1]
 
     @property
     def train_dataset(self) -> Dataset:
@@ -564,9 +596,15 @@ class _BaseModelTraining(luigi.Task, metaclass=abc.ABCMeta):
     def train(self):
         pass
 
-    def cache_cleanup(self):
+    def cache_cleanup(self, keep: Iterable[str] = ()):
+        """Drop the cached data frames / datasets listed in :attr:`cache_attrs`.
+
+        :param keep: attribute names to leave in place (e.g. the validation
+            split when it is about to be evaluated).
+        """
+        keep = set(keep)
         for a in self.cache_attrs:
-            if hasattr(self, a):
+            if a not in keep and hasattr(self, a):
                 delattr(self, a)
 
     def seed_everything(self):
@@ -725,11 +763,12 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             self.recommender_module_class.split(".")[-1],
             self.device,
         )
+        self._split_stats = self._compute_split_stats()
         logger.info(
             "splits: train=%d | val=%d | test=%d",
-            len(self.train_data_frame),
-            len(self.val_data_frame),
-            len(self.test_data_frame),
+            self._split_stats["train_size"],
+            self._split_stats["val_size"],
+            self._split_stats["test_size"],
         )
         logger.info(
             "training: epochs=%s | batch_size=%s | lr=%s | loss=%s | optimizer=%s",
@@ -851,6 +890,20 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         except Exception:  # noqa: BLE001 — log + continue, don't abort training
             logger.exception("sample_train_scores save failed — continuing")
 
+    def _compute_split_stats(self) -> Dict[str, int]:
+        """Row counts of the three splits plus distinct users / items in train."""
+        train_df = self.train_data_frame
+        stats = {
+            "train_size": len(train_df),
+            "val_size": len(self.val_data_frame),
+            "test_size": len(self.test_data_frame),
+        }
+        if self.project_config.item_column:
+            stats["n_items"] = len(train_df[self.project_config.item_column.name].unique())
+        if self.project_config.user_column:
+            stats["n_users"] = len(train_df[self.project_config.user_column.name].unique())
+        return stats
+
     def _save_metadata(self):
         """Save comprehensive metadata.json with all information needed to
         register the training run and replicate the experiment."""
@@ -896,18 +949,20 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
                 }
 
         # --- Data splits info ---
+        # Recorded by train() while the splits were loaded: evaluate() has
+        # released them by now, and reloading only to count rows is costly.
+        split_stats = getattr(self, "_split_stats", None) or self._compute_split_stats()
         data_info = {
-            "train_size": len(self.train_data_frame),
-            "val_size": len(self.val_data_frame),
-            "test_size": len(self.test_data_frame),
+            "train_size": split_stats["train_size"],
+            "val_size": split_stats["val_size"],
+            "test_size": split_stats["test_size"],
             "n_features": len(self.project_config.input_columns),
             "input_columns": [col.name for col in self.project_config.input_columns],
             "output_column": self.project_config.output_column.name,
         }
-        if self.project_config.item_column:
-            data_info["n_items"] = len(self.train_data_frame[self.project_config.item_column.name].unique())
-        if self.project_config.user_column:
-            data_info["n_users"] = len(self.train_data_frame[self.project_config.user_column.name].unique())
+        for key in ("n_items", "n_users"):
+            if key in split_stats:
+                data_info[key] = split_stats[key]
 
         # --- Artifacts list ---
         artifacts = (
@@ -1025,7 +1080,9 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
         ``metadata.json``. Test-set ranking metrics are computed earlier, in
         :meth:`SupervisedModelTraining.after_fit`.
         """
-        self.cache_cleanup()
+        # Free the train / test splits before evaluating, but keep the
+        # validation split: it is the one about to be scored.
+        self.cache_cleanup(keep=("_val_data_frame", "_val_dataset"))
         val_loader = self.get_val_generator()
         banner("Evaluation (validation set)", logger=logger)
         self._eval_results = self._evaluate_on_dataloader(val_loader)
