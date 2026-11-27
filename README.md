@@ -1,7 +1,7 @@
 # MARS-Rec
 
 [![CI](https://github.com/marlesson/mars-rec/actions/workflows/ci.yml/badge.svg)](https://github.com/marlesson/mars-rec/actions/workflows/ci.yml)
-[![Docs](https://github.com/marlesson/mars-rec/actions/workflows/docs.yml/badge.svg)](https://marlesson.github.io/mars-rec/)
+[![Docs](https://github.com/marlesson/mars-rec/actions/workflows/docs.yml/badge.svg)](https://github.com/marlesson/mars-rec/actions/workflows/docs.yml)
 
 **MARS-Rec** is a framework to model, train, and evaluate deep-learning recommendation systems.
 It is the supervised-only successor of [MARS-Gym](https://github.com/deeplearningbrasil/mars-gym)
@@ -9,7 +9,7 @@ It is the supervised-only successor of [MARS-Gym](https://github.com/deeplearnin
 policy-evaluation layers were removed, keeping a lean **data preparation → supervised training →
 evaluation** pipeline built on Luigi, PyTorch and PyTorch Lightning.
 
-📖 **Documentation: <https://marlesson.github.io/mars-rec/>**
+📖 **Documentation:** [`docs/`](docs/index.md). Preview it as a site with `pip install -e ".[docs]" && make docs-serve`.
 
 ## Features
 
@@ -71,7 +71,7 @@ class MyModel(RecommenderModule):
 ```
 
 For a step-by-step walkthrough, see
-[Your first project](https://marlesson.github.io/mars-rec/tutorials/custom-project/).
+[Your first project](docs/tutorials/custom-project.md).
 
 ## Examples
 
@@ -91,13 +91,13 @@ PYTHONPATH=src:. python examples/<name>/run_training.py
 
 | Section | Content |
 |---|---|
-| [Getting started](https://marlesson.github.io/mars-rec/getting-started/) | Installation and quickstart |
-| [Concepts](https://marlesson.github.io/mars-rec/concepts/) | `ProjectConfig`, models, pipeline, index mapping, caching |
-| [Tutorials](https://marlesson.github.io/mars-rec/tutorials/) | Building a project, and the five examples |
-| [Guides](https://marlesson.github.io/mars-rec/guides/) | Training parameters, inference, extending, Docker & Vertex AI |
-| [Reference](https://marlesson.github.io/mars-rec/reference/) | CLI and Python API |
+| [Getting started](docs/getting-started/index.md) | Installation and quickstart |
+| [Concepts](docs/concepts/index.md) | `ProjectConfig`, models, pipeline, index mapping, caching |
+| [Tutorials](docs/tutorials/index.md) | Building a project, and the five examples |
+| [Guides](docs/guides/index.md) | Training parameters, inference, extending, Docker & Vertex AI |
+| [Reference](docs/reference/index.md) | CLI and Python API |
 
-To preview the docs locally: `pip install -e ".[docs]" && make docs-serve`.
+The API and CLI reference pages are generated, so read them in the built site (`make docs-serve`).
 
 ## Contributing
 

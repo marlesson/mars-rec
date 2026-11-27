@@ -25,6 +25,11 @@ env:
   # CPU-only torch wheels: the CLI reference imports mars_rec, which imports torch.
   TORCH_INDEX: https://download.pytorch.org/whl/cpu
   NO_MKDOCS_2_WARNING: "1"
+  # Publishing to GitHub Pages is opt-in: set the repository variable DOCS_DEPLOY=true
+  # (Settings → Secrets and variables → Actions → Variables) after enabling
+  # Settings → Pages → Source: GitHub Actions. Note: a Pages site is public even
+  # when the repository is private (outside GitHub Enterprise Cloud).
+  DEPLOY: ${{ github.event_name != 'pull_request' && vars.DOCS_DEPLOY == 'true' }}
 
 jobs:
   build:
@@ -43,12 +48,12 @@ jobs:
       - name: Build (strict)
         run: make docs
       - uses: actions/upload-pages-artifact@v5
-        if: github.event_name != 'pull_request'
+        if: env.DEPLOY == 'true'
         with:
           path: site
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && vars.DOCS_DEPLOY == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:

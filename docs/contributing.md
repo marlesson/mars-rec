@@ -16,4 +16,5 @@ make docs         # strict build into site/, the same check CI runs
 - Example tutorials include source files with `--8<-- "examples/<name>/model.py"`, so they stay in sync with the code.
 - Docstrings may use Google (`Args:`) or Sphinx (`:param x:`) sections. Sphinx roles such as
   ``:class:`mars_rec.meta_config.ProjectConfig` `` are turned into links by `docs/_ext/griffe_sphinx_roles.py`.
-- Every push to `main` publishes the site to GitHub Pages (`.github/workflows/docs.yml`).
+- CI runs the strict build on every PR that touches the docs or the code (`.github/workflows/docs.yml`).
+  Publishing to GitHub Pages is opt-in through the `DOCS_DEPLOY` repository variable.

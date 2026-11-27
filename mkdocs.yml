@@ -1,6 +1,5 @@
 site_name: MARS-Rec
 site_description: Framework to model, train, and evaluate deep-learning recommendation systems.
-site_url: https://marlesson.github.io/mars-rec/
 repo_url: https://github.com/marlesson/mars-rec
 repo_name: marlesson/mars-rec
 edit_uri: edit/main/docs/
