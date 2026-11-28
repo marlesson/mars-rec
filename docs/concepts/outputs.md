@@ -25,10 +25,10 @@ Every training run writes to `$OUTPUT_PATH/models/SupervisedModelTraining/result
 │       └── sample_train_scores.csv  # Model logits for those rows
 └── eval/                            # One sub-directory per evaluation
     ├── test/                        # Post-training evaluation on the original test split
-    │   ├── metrics.json             # Point-wise, ranking and ROC-AUC metrics
-    │   ├── predictions.csv          # Per-row scores and ranking
+    │   ├── metrics.json             # Point-wise, ranking (+ baseline, protocol) and ROC-AUC metrics
+    │   ├── predictions.csv          # Top-k items per ranking query (ranking_metrics=True)
     │   └── plots/
-    │       ├── scores.png           # Prediction score distribution
+    │       ├── scores.png           # Score distribution of the ranked candidates (ranking_metrics=True)
     │       ├── confusion_matrix.png # Binary targets only
     │       ├── roc_curve.png        # Binary targets only
     │       └── precision_recall_curve.png

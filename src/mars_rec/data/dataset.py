@@ -659,7 +659,11 @@ class InteractionsWithNegativeItemGenerationByAvailableItemsDataset(Interactions
         *args,
         **kwargs,
     ) -> None:
-        assert project_config.available_items_column_name in data_frame
+        column = project_config.available_items_column_name
+        assert column and column in data_frame, (
+            f"{type(self).__name__} needs a per-row slate column: set ProjectConfig.available_items_column_name "
+            f"(got {column!r}) to a column present in the data."
+        )
         self._available_items = (
             data_frame[project_config.available_items_column_name]
             .map(functools.partial(map_array, mapping=index_mapping[project_config.item_column.name]))

@@ -315,8 +315,9 @@ class BasePrepareDataFrames(luigi.Task, metaclass=abc.ABCMeta):
         ``available_items_column_name`` is absent, attach a list of up
         to 99 randomly sampled items plus the row's positive item. The
         draw is seeded with ``seed``, so the same parameters always
-        produce the same slates (training-time ranking metrics use them
-        as the candidate pool).
+        produce the same slates. The slate is only read when the
+        ``ProjectConfig`` declares ``available_items_column_name``; the
+        ranking evaluation then uses it as the candidate pool.
 
         Skipped entirely when ``available_items_column_name`` is ``None``
         or empty (``ProjectConfig(available_items_column_name=None)``), so

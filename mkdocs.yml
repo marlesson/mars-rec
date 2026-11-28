@@ -126,6 +126,7 @@ nav:
       - ProjectConfig & columns: concepts/project-config.md
       - Models: concepts/models.md
       - Pipeline: concepts/pipeline.md
+      - Ranking evaluation: concepts/evaluation.md
       - Index mapping: concepts/index-mapping.md
       - Outputs & caching: concepts/outputs.md
   - Tutorials:
@@ -152,6 +153,7 @@ nav:
           - mars_rec.meta_config: reference/api/meta_config.md
           - mars_rec.simulation.training: reference/api/training.md
           - mars_rec.inference: reference/api/inference.md
+          - mars_rec.evaluation: reference/api/evaluation.md
           - mars_rec.filtering: reference/api/filtering.md
           - mars_rec.visualization: reference/api/visualization.md
           - mars_rec.data: reference/api/data.md

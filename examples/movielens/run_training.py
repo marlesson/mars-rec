@@ -41,6 +41,9 @@ if __name__ == "__main__":
         early_stopping_patience=3,
         metrics=["loss", "binary_accuracy"],
         ranking_metrics=True,
+        # Full-catalog ranking scores every (query, item) pair: evaluate a
+        # 2000-query sample to keep the example fast.
+        sample_size_eval=2000,
     )
 
     success = luigi.build([task], local_scheduler=True, log_level="INFO")

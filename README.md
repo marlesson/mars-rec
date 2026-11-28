@@ -18,7 +18,9 @@ evaluation** pipeline built on Luigi, PyTorch and PyTorch Lightning.
 - **Reproducible pipelines**: Luigi caches every step by a hash of its parameters.
 - **PyTorch Lightning training loop**: early stopping, checkpointing, CSV logging (TensorBoard optional),
   LR schedulers and mixed precision.
-- **Ranking metrics**: NDCG, HitRate, MRR and MAP @{5, 10, 20} plus ROC-AUC.
+- **Ranking evaluation**: full-catalog top-k ranking with seen items excluded. Reports NDCG, HitRate,
+  Precision, Recall, MRR and MAP, plus coverage, Gini, popularity and novelty, all @{5, 10, 20}.
+  Includes a most-popular baseline and ROC-AUC.
 - **One CLI** (`mars-rec`): `run`, `list`, `results`, `predict`, `evaluate` and `visualize`.
 - **Docker & Vertex AI**: the same image runs locally and on Google Cloud.
 

@@ -38,7 +38,6 @@ Two helper functions are also exposed:
 
 import abc
 import gc
-import hashlib
 import json
 import logging
 import os
@@ -51,7 +50,7 @@ import time
 import warnings
 from contextlib import redirect_stdout
 from copy import deepcopy
-from typing import Type, Dict, Iterable, List, Optional, Tuple, Any, cast
+from typing import Type, Dict, Iterable, List, Optional, Tuple, Any
 import luigi
 import numpy as np
 import pandas as pd
@@ -76,7 +75,6 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_convert
 from torch.utils.data.dataset import Dataset
-from tqdm import tqdm
 import matplotlib
 
 matplotlib.use("Agg")
@@ -86,7 +84,6 @@ from mars_rec.data.candidate_features import (
     FN_PARAM as CANDIDATE_FN_PARAM,
     LOOKUP_PARAM as CANDIDATE_LOOKUP_PARAM,
     CandidateFeatureFn,
-    apply_candidate_features_to_frame,
     resolve_candidate_lookup,
     validate_candidate_feature_fn,
 )
@@ -96,6 +93,14 @@ from mars_rec.data.dataset import (
     literal_eval_array_columns,
     InteractionsDataset,
 )
+from mars_rec.evaluation import (
+    DEFAULT_KS,
+    InteractionHistory,
+    build_ranking_queries,
+    evaluate_rankings,
+    positive_mask,
+)
+from mars_rec.filtering import AvailableItemsColumnProvider, CandidateProvider
 from mars_rec.meta_config import IOType, ProjectConfig
 from mars_rec.model.abstract import RecommenderModule
 from mars_rec.torch.data import NoAutoCollationDataLoader, FasterBatchSampler
@@ -729,6 +734,8 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
     # T4/L4/A100 all benefit from FP16 mixed; bf16 only on Ampere+.
     precision: str = luigi.Parameter(default="")
 
+    # Cap on the ranking queries scored against the full catalog (and on the
+    # ROC-AUC rows); ``None`` evaluates every query.
     sample_size_eval: int = luigi.OptionalIntParameter(default=None)
     ranking_metrics: bool = luigi.BoolParameter(default=False)
 
@@ -1066,6 +1073,8 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             "history": history_summary,
             "evaluation": getattr(self, "_eval_results", {}),
             "ranking_metrics": getattr(self, "_ranking_metrics", {}),
+            "ranking_baseline": getattr(self, "_ranking_baseline_metrics", {}),
+            "ranking_protocol": getattr(self, "_ranking_protocol", {}),
             "roc_auc_metrics": getattr(self, "_roc_auc_metrics", {}),
             "environment": {
                 "python": sys.version.split()[0],
@@ -1115,6 +1124,8 @@ class TorchModelTraining(_BaseModelTraining, metaclass=abc.ABCMeta):
             results["val_metrics"] = self._eval_results
         if hasattr(self, "_ranking_metrics"):
             results["ranking_metrics"] = self._ranking_metrics
+            results["ranking_baseline"] = getattr(self, "_ranking_baseline_metrics", {})
+            results["ranking_protocol"] = getattr(self, "_ranking_protocol", {})
         if hasattr(self, "_roc_auc_metrics"):
             results["roc_auc_metrics"] = self._roc_auc_metrics
         return results
@@ -1608,72 +1619,12 @@ class SupervisedModelTraining(TorchModelTraining):
     """
 
     @property
-    def unique_items(self) -> List[int]:
-        if not hasattr(self, "_unique_items"):
-            self._unique_items = list(self.index_mapping[self.project_config.item_column.name].keys())[1:-1]
-            self._unique_items = [x for x in self._unique_items if str(x) != "nan"]
-        return self._unique_items
-
-    @property
     def obs_columns(self) -> List[str]:
         if not hasattr(self, "_obs_columns"):
             self._obs_columns = [self.project_config.user_column.name] + [
                 column.name for column in self.project_config.other_input_columns
             ]
         return self._obs_columns
-
-    def _get_candidate_items(self, ob: dict) -> List[Any]:
-        # Deterministic per-row RNG: stable across runs/processes, and unique
-        # per (user, item) so different rows still get different negative samples.
-        # Uses md5 to derive an integer seed — faster than random.Random(str)
-        # which internally calls sha512 on the string representation.
-        user_col = self.project_config.user_column.name
-        item_col = self.project_config.item_column.name
-        user_val = ob.get(user_col, "")
-        item_val = ob.get(item_col, "")
-        seed_int = int.from_bytes(
-            hashlib.md5(f"{self.seed}|{user_val}|{item_val}".encode()).digest()[:8],
-            "little",
-        )
-        rng = random.Random(seed_int)
-
-        # Prefer a CandidateProvider when the project declares one AND the
-        # caller opted in via ``self._enable_prefilter``. The opt-in keeps
-        # legacy post-train ranking metrics byte-identical for everyone who
-        # hasn't explicitly asked for the filter (mars-rec evaluate
-        # exposes the flag via --prefilter; submission scripts via their own
-        # CLI flag). Provider returns framework-indexed item idx; we map back
-        # to raw ids because _prepare_for_prediction expects raw values for
-        # INDEXABLE item columns.
-        if getattr(self, "_enable_prefilter", False):
-            provider = self._lazy_candidate_provider()
-            if provider is not None:
-                full_catalog = self._full_catalog_idx()
-                cand_idx = provider.get_candidates(ob, full_catalog)
-                if len(cand_idx) > 0:
-                    rev = self.reverse_index_mapping[self.project_config.item_column.name]
-                    items = [rev[int(i)] for i in cand_idx if int(i) in rev]
-                    if items:
-                        return items
-
-        if self.project_config.available_items_column_name and self.project_config.available_items_column_name in ob:
-            items = ob[self.project_config.available_items_column_name]
-            items = rng.sample(items, len(items))
-        else:
-            if (
-                ob[self.project_config.item_column.name]
-                in self.reverse_index_mapping[self.project_config.item_column.name]
-            ):
-                ob_item = self.reverse_index_mapping[self.project_config.item_column.name][
-                    ob[self.project_config.item_column.name]
-                ]
-                items = rng.sample(self.unique_items, min(101, len(self.unique_items)))
-                items.append(ob_item)
-                items = list(np.unique(items))
-            else:
-                items = rng.sample(self.unique_items, min(100, len(self.unique_items)))
-
-        return items
 
     def _lazy_candidate_provider(self):
         """Build (and cache) the CandidateProvider declared by the project, if any."""
@@ -1707,30 +1658,6 @@ class SupervisedModelTraining(TorchModelTraining):
         )
         self._cached_full_catalog_idx = real_indices(item_map)
         return self._cached_full_catalog_idx
-
-    def _get_item_scores(self, ob_dataset: Dataset) -> np.ndarray:
-        """Score items using the trained model. Returns a 1-D numpy array."""
-        batch_sampler = FasterBatchSampler(ob_dataset, self.batch_size, shuffle=False)
-        generator = NoAutoCollationDataLoader(
-            ob_dataset,
-            batch_sampler=batch_sampler,
-            num_workers=self.generator_workers,
-            pin_memory=self.pin_memory if self.device == "cuda" else False,
-        )
-
-        model = self._get_cached_trained_module()
-        model.eval()
-        score_arrays = []
-
-        with torch.no_grad():
-            for i, (x, _) in tqdm(enumerate(generator), total=len(generator), disable=(len(generator) <= 1)):
-                input_params = x if isinstance(x, list) or isinstance(x, tuple) else [x]
-                input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
-
-                scores_tensor: torch.Tensor = model.recommendation_score(*input_params)
-                score_arrays.append(scores_tensor.cpu().numpy().ravel())
-
-        return np.concatenate(score_arrays) if score_arrays else np.array([], dtype=np.float32)
 
     def _plot_metadata(self):
         """Return metadata dict for plot annotations."""
@@ -1859,9 +1786,9 @@ class SupervisedModelTraining(TorchModelTraining):
     def _resolved_candidate_feature_lookup(self) -> Optional[Dict[str, Any]]:
         """Return the ``candidate_feature_lookup`` dict (resolved once, cached).
 
-        Uses the same resolver as ``InteractionsDataset`` so the eval-time
-        ranking step (``_create_ob_data_frame``) and the train-time negative
-        samplers see the same lookup.
+        Uses the same resolver as ``InteractionsDataset`` and
+        ``score_candidates_bce``. The ranking evaluation reads its keys to
+        leave item-dependent columns out of the query context.
         """
         if not hasattr(self, "_cached_candidate_feature_lookup"):
             raw = (self.project_config.dataset_extra_params or {}).get(CANDIDATE_LOOKUP_PARAM)
@@ -1873,34 +1800,6 @@ class SupervisedModelTraining(TorchModelTraining):
         """Return the project's ``candidate_feature_fn`` hook, if any."""
         return validate_candidate_feature_fn((self.project_config.dataset_extra_params or {}).get(CANDIDATE_FN_PARAM))
 
-    def _create_ob_data_frame(self, ob: dict, item_indices: List[int]) -> pd.DataFrame:
-        data = [{**ob, self.project_config.item_column.name: item_index} for item_index in item_indices]
-        ob_df = pd.DataFrame(columns=self.obs_columns + [self.project_config.item_column.name], data=data)
-
-        ob_df = self._fill_hist_columns(ob_df)
-
-        # Rewrite item-dependent columns for each candidate with the same
-        # helper the negative samplers use. Without it every candidate in the
-        # ranking pool inherits the positive row's item features, and the
-        # model "ranks" by spotting the mismatch: a shortcut that does not
-        # transfer to full-catalog scoring.
-        apply_candidate_features_to_frame(
-            ob_df,
-            np.asarray(item_indices, dtype=np.int64),
-            self.project_config.input_columns,
-            self._resolved_candidate_feature_lookup,
-            self._candidate_feature_fn,
-            item_column_name=self.project_config.item_column.name,
-        )
-
-        if self.project_config.output_column.name not in ob_df.columns:
-            ob_df[self.project_config.output_column.name] = 1
-        for auxiliar_output_column in self.project_config.auxiliar_output_columns:
-            if auxiliar_output_column.name not in ob_df.columns:
-                ob_df[auxiliar_output_column.name] = 0
-
-        return ob_df
-
     def _fill_hist_columns(self, ob_df: pd.DataFrame) -> pd.DataFrame:
         if self.project_config.hist_view_column_name not in ob_df:
             ob_df[self.project_config.hist_view_column_name] = 0
@@ -1908,155 +1807,200 @@ class SupervisedModelTraining(TorchModelTraining):
             ob_df[self.project_config.hist_output_column_name] = 0
         return ob_df
 
-    def _prepare_for_prediction(
-        self, obs: List[Dict[str, Any]]
-    ) -> Tuple[List[List[Any]], List[List[int]], List[List[float]]]:
-        """Prepare observations for prediction."""
-        n_obs = len(obs)
-        log_every = max(1, n_obs // 10)
-        t0 = time.time()
+    def _ranking_context_columns(self) -> List[str]:
+        """Input columns that define a ranking query's context (see :mod:`mars_rec.evaluation`).
 
-        items_list: List[List[Any]] = []
-        for i, ob in enumerate(obs):
-            items_list.append(self._get_candidate_items(ob))
-            if (i + 1) % log_every == 0 or (i + 1) == n_obs:
-                logger.info(
-                    "  candidates: %d/%d (%.1fs)",
-                    i + 1,
-                    n_obs,
-                    time.time() - t0,
-                )
+        Every non-item input column, minus the ones rewritten per candidate
+        through ``candidate_feature_lookup`` (they describe the item, not the
+        context). The candidate slate column is part of the context: rows with
+        different slates rank different candidates.
+        """
+        item_col = self.project_config.item_column.name
+        item_dependent = {k for k in (self._resolved_candidate_feature_lookup or {}) if isinstance(k, str)}
+        columns = [
+            c.name
+            for c in self.project_config.other_input_columns
+            if c.name != item_col and c.name not in item_dependent
+        ]
+        slate = self.project_config.available_items_column_name
+        if slate and slate in self.test_data_frame.columns:
+            columns.append(slate)
+        return columns
 
-        # Hoist the mapping dict to avoid repeated dict lookup per observation
-        if self.project_config.item_column.type in [
-            IOType.INDEXABLE,
-            IOType.INDEXABLE_ARRAY,
-        ]:
+    def _ranking_history(self) -> InteractionHistory:
+        """Indexed train + validation interactions: seen items and popularity."""
+        cfg = self.project_config
+        user_col, item_col, out_col = cfg.user_column.name, cfg.item_column.name, cfg.output_column.name
+        frames = []
+        for path in (self.train_data_frame_path, self.val_data_frame_path):
+            header = pd.read_csv(path, nrows=0).columns
+            frames.append(
+                pd.read_csv(path, usecols=[c for c in dict.fromkeys([user_col, item_col, out_col]) if c in header])
+            )
+        interactions = pd.concat(frames, ignore_index=True)
+
+        def to_index(column: str) -> np.ndarray:
+            values = interactions[column]
+            if values.dtype != object:
+                values = values.astype(str)
+            return values.map(self.index_mapping[column]).fillna(0).to_numpy(dtype=np.int64)
+
+        item_map = self.index_mapping[item_col]
+        return InteractionHistory.from_interactions(
+            users=to_index(user_col),
+            items=to_index(item_col),
+            positive=positive_mask(interactions, item_col, out_col),
+            n_items=max(item_map.values()) + 1 if item_map else 1,
+        )
+
+    def _ranking_candidate_provider(self, query_rows: pd.DataFrame) -> Tuple[Optional[CandidateProvider], str]:
+        """Candidate pool for the ranking evaluation and its protocol label.
+
+        A project ``CandidateProvider`` (when enabled with ``--prefilter``)
+        wins, then the per-row ``available_items`` slate, then the full
+        catalog. ``query_rows`` gets the slate mapped to item indices in place.
+        """
+        if getattr(self, "_enable_prefilter", False):
+            provider = self._lazy_candidate_provider()
+            if provider is not None:
+                return provider, provider.name()
+        slate = self.project_config.available_items_column_name
+        if slate and slate in query_rows.columns:
             item_map = self.index_mapping[self.project_config.item_column.name]
-            item_indices_list = [map_array(items, item_map) for items in items_list]
-        else:
-            item_indices_list = cast(List[List[int]], items_list)
+            query_rows[slate] = [
+                [i for i in map_array(list(items), item_map) if i > 0]
+                if isinstance(items, (list, tuple, np.ndarray))
+                else []
+                for items in query_rows[slate]
+            ]
+            return AvailableItemsColumnProvider(slate), "available_items"
+        return None, "full_catalog"
 
-        t1 = time.time()
-        ob_dfs: List[pd.DataFrame] = []
-        for i, (ob, item_indices) in enumerate(zip(obs, item_indices_list)):
-            ob_dfs.append(self._create_ob_data_frame(ob, item_indices))
-            if (i + 1) % log_every == 0 or (i + 1) == n_obs:
-                logger.info(
-                    "  ob_data_frames: %d/%d (%.1fs)",
-                    i + 1,
-                    n_obs,
-                    time.time() - t1,
-                )
-        ob_lengths = [len(df) for df in ob_dfs]
-        # No ``copy=False``: it is deprecated since pandas 3.0, where
-        # Copy-on-Write already defers the copy.
-        combined_df = pd.concat(ob_dfs, ignore_index=True)
+    def _score_ranking_queries(
+        self, query_rows: pd.DataFrame, provider: Optional[CandidateProvider]
+    ) -> Tuple[List[torch.Tensor], List[np.ndarray]]:
+        """Score each query row against its candidates with the trained model."""
+        from mars_rec.inference import score_candidates_bce, score_candidates_ce, score_candidates_emb
 
-        logger.info(
-            "  combined rows=%d → running model inference",
-            len(combined_df),
+        model = self._get_cached_trained_module()
+        model.eval()
+        common = dict(
+            df_processed=query_rows,
+            project_config=self.project_config,
+            index_mapping=self.index_mapping,
+            full_catalog=self._full_catalog_idx(),
+            candidate_provider=provider,
+            device=str(self.torch_device),
+            show_progress=len(query_rows) > 1,
         )
-        obs_dataset = InteractionsDataset(
-            combined_df,
-            self.embeddings_for_metadata,
-            self.project_config,
-            self.index_mapping,
-        )
-
-        t2 = time.time()
-        all_item_scores = self._get_item_scores(obs_dataset)
-        logger.info(
-            "  inference: %d scores in %.1fs",
-            len(all_item_scores),
-            time.time() - t2,
-        )
-
-        # Slice numpy array into per-observation lists (numpy slicing is O(1) view)
-        item_scores_list: List[List[float]] = []
-        offset = 0
-        for length in ob_lengths:
-            item_scores_list.append(all_item_scores[offset : offset + length].tolist())
-            offset += length
-
-        return items_list, item_indices_list, item_scores_list
+        if self.loss_function in _EMBEDDING_LOSSES and hasattr(model, "get_target_emb"):
+            return score_candidates_emb(model, **common)
+        if not self.project_config.item_is_input:
+            return score_candidates_ce(model, **common)
+        return score_candidates_bce(model, embeddings_for_metadata=self.embeddings_for_metadata, **common)
 
     def _save_test_set_predictions(self) -> None:
-        """Save test set predictions using the trained model directly."""
+        """Rank the catalog for every test query and save predictions (+ ranking metrics).
+
+        Follows the protocol of :mod:`mars_rec.evaluation`: positive test rows
+        grouped into queries, full-catalog (or slate / provider) candidates,
+        seen items excluded, random tie-break, per-user averaging.
+        ``sample_size_eval`` caps the number of queries.
+        """
         banner("Test-set predictions", logger=logger)
-
-        if self.sample_size_eval and len(self.test_data_frame) > self.sample_size_eval:
-            obs: List[Dict[str, Any]] = self.test_data_frame.sample(
-                self.sample_size_eval, random_state=self.seed
-            ).to_dict("records")
-            logger.info(
-                "Sampling %d/%d test rows (sample_size_eval, seed=%d)",
-                len(obs),
-                len(self.test_data_frame),
-                self.seed,
-            )
-        else:
-            obs: List[Dict[str, Any]] = self.test_data_frame.to_dict("records")
-            logger.info("Scoring all %d test rows", len(obs))
-
-        items_list, item_indices_list, item_scores_list = self._prepare_for_prediction(obs)
-
-        # Rank by score (descending)
-        sorted_actions_list = []
-        for items, scores in zip(items_list, item_scores_list):
-            sorted_pairs = sorted(zip(scores, items), reverse=True)
-            sorted_actions_list.append([item for _, item in sorted_pairs])
-
-        action_scores_list = [list(reversed(sorted(action_scores))) for action_scores in item_scores_list]
-
-        del obs
-
-        # Create evaluation file
-        if hasattr(self, "_external_raw_df"):
-            df = self._external_raw_df.copy()
-        else:
-            df = pd.read_csv(self.test_data_frame_path)
-        if self.sample_size_eval and len(self.test_data_frame) > self.sample_size_eval:
-            df = df.sample(self.sample_size_eval, random_state=self.seed)
-
-        df["sorted_actions"] = sorted_actions_list
-        df["action_scores"] = action_scores_list
-
-        # Join with train interaction information
-        df_train = self.get_data_frame_interactions()[
-            [self.project_config.user_column.name, self.project_config.item_column.name]
-        ].drop_duplicates()
-        df_train["trained"] = 1
-        df = df.merge(
-            df_train, on=[self.project_config.user_column.name, self.project_config.item_column.name], how="left"
-        )
-        df["trained"] = df["trained"].fillna(0)
-
-        # Add indexed information
-        df["item_indexed"] = df[self.project_config.item_column.name].apply(
-            lambda i: self.index_mapping[self.project_config.item_column.name][str(i)] > 0
-        )
-
-        scores = [score for item_scores in item_scores_list for score in item_scores]
-        self._plot_scores(scores)
         self._plot_classification_curves()
+        if not self.ranking_metrics:
+            logger.info("ranking_metrics=False: skipping the top-k ranking evaluation")
+            return
 
-        # Ranking metrics (only when explicitly enabled)
-        if self.ranking_metrics:
-            self._ranking_metrics = self._compute_ranking_metrics(df, sorted_actions_list)
-            if self._ranking_metrics:
-                banner("Ranking metrics", logger=logger)
-                for metric_name, value in self._ranking_metrics.items():
-                    logger.info("  %-20s %.4f", metric_name, value)
+        cfg = self.project_config
+        test_df = self.test_data_frame
+        item_col = cfg.item_column.name
+        relevant_col = cfg.output_column.name if not cfg.item_is_input else item_col
 
-            self._roc_auc_metrics = self._compute_roc_auc()
-            if self._roc_auc_metrics:
-                banner("ROC-AUC", logger=logger)
-                for metric_name, value in self._roc_auc_metrics.items():
-                    logger.info("  %-20s %.4f", metric_name, value)
+        queries = build_ranking_queries(
+            test_df,
+            user_column=cfg.user_column.name,
+            item_column=relevant_col,
+            output_column=cfg.output_column.name,
+            context_columns=self._ranking_context_columns(),
+        )
+        n_queries = len(queries)
+        queries = queries.sample(self.sample_size_eval, seed=self.seed)
+        logger.info(
+            "Ranking queries: %d (from %d positive / %d test rows)%s",
+            len(queries),
+            queries.n_positive_rows,
+            queries.n_rows,
+            f", sampled from {n_queries} (sample_size_eval)" if len(queries) < n_queries else "",
+        )
 
+        query_rows = self._fill_hist_columns(test_df.iloc[queries.positions].reset_index(drop=True).copy())
+        provider, candidate_source = self._ranking_candidate_provider(query_rows)
+        if provider is None:
+            n_pairs = len(query_rows) * len(self._full_catalog_idx())
+            logger.info(
+                "  scoring %d queries × %d items (full catalog)", len(query_rows), len(self._full_catalog_idx())
+            )
+            if n_pairs > 50_000_000:
+                logger.warning(
+                    "  %d (query, item) pairs to score — set sample_size_eval to evaluate fewer queries", n_pairs
+                )
+        scores, candidates = self._score_ranking_queries(query_rows, provider)
+
+        history = self._ranking_history()
+        result = evaluate_rankings(
+            queries,
+            scores,
+            candidates,
+            ks=DEFAULT_KS,
+            history=history,
+            n_catalog_items=len(self._full_catalog_idx()),
+            candidate_source=candidate_source,
+            seed=self.seed,
+        )
+        if result.protocol["n_relevant_seen_dropped"]:
+            logger.info(
+                "  %d relevant items were already seen in train/val and were dropped (%d queries left empty)",
+                result.protocol["n_relevant_seen_dropped"],
+                result.protocol["n_queries_dropped"],
+            )
+
+        # Score distribution plot: a bounded sample of every ranked score.
+        flat = np.concatenate([np.asarray(s, dtype=np.float32).ravel() for s in scores]) if scores else np.empty(0)
+        if len(flat) > 200_000:
+            flat = np.random.default_rng(self.seed).choice(flat, size=200_000, replace=False)
+        self._plot_scores(flat.tolist())
+
+        self._ranking_metrics = result.metrics
+        self._ranking_baseline_metrics = result.baseline_metrics
+        self._ranking_protocol = result.protocol
+        if result.metrics:
+            banner("Ranking metrics", logger=logger)
+            logger.info("  %-20s %10s %10s", "metric", "model", "popularity")
+            for metric_name, value in result.metrics.items():
+                baseline = result.baseline_metrics.get(metric_name)
+                logger.info("  %-20s %10.4f %10s", metric_name, value, "-" if baseline is None else f"{baseline:.4f}")
+
+        self._roc_auc_metrics = self._compute_roc_auc()
+        if self._roc_auc_metrics:
+            banner("ROC-AUC", logger=logger)
+            for metric_name, value in self._roc_auc_metrics.items():
+                logger.info("  %-20s %.4f", metric_name, value)
+
+        rev_items = self.reverse_index_mapping[item_col]
+        rev_users = self.reverse_index_mapping[cfg.user_column.name]
+        predictions = pd.DataFrame(
+            {
+                cfg.user_column.name: [rev_users.get(int(u), u) for u in result.queries.users],
+                "relevant_items": [[rev_items.get(int(i), i) for i in rel] for rel in result.queries.relevant],
+                "sorted_actions": [[rev_items.get(int(i), i) for i in items] for items in result.top_items],
+                "action_scores": [np.round(s, 6).tolist() for s in result.top_scores],
+                "n_candidates": result.n_candidates,
+            }
+        )
         predictions_path = ensure_parent_dir(get_test_set_predictions_path(self.eval_output_dir))
-        df.to_csv(predictions_path, index=False)
+        predictions.to_csv(predictions_path, index=False)
         logger.info("Test predictions saved → %s", predictions_path)
 
     def _get_roc_auc_dataset(self) -> Dataset:
@@ -2064,8 +2008,7 @@ class SupervisedModelTraining(TorchModelTraining):
 
         Builds a fresh subsampled dataset when ``sample_size_eval`` is
         set and smaller than the full test set; otherwise reuses
-        ``self.test_dataset``. The subsample uses ``random_state=self.seed``
-        to match the obs sampled by ``_save_test_set_predictions``.
+        ``self.test_dataset``. The subsample uses ``random_state=self.seed``.
         """
         if self.sample_size_eval and len(self.test_data_frame) > self.sample_size_eval:
             df = self.test_data_frame.sample(
@@ -2153,55 +2096,6 @@ class SupervisedModelTraining(TorchModelTraining):
 
         return results
 
-    def _compute_ranking_metrics(
-        self,
-        df: pd.DataFrame,
-        sorted_actions_list: List[List[Any]],
-        ks: List[int] = [5, 10, 20],
-    ) -> Dict[str, float]:
-        """Compute ranking metrics (NDCG, HitRate, MRR, MAP) per user.
-
-        For each test observation, the ground-truth item is the item_id
-        in the test row. We check where it appears in the ranked list
-        of candidate items produced by the model.
-        """
-        item_col = self.project_config.item_column.name
-        ground_truth_items = df[item_col].astype(str).tolist()
-
-        if len(ground_truth_items) != len(sorted_actions_list):
-            return {}
-
-        results = {}
-
-        for k in ks:
-            ndcg_scores = []
-            hit_scores = []
-            rr_scores = []
-            ap_scores = []
-
-            for gt_item, ranked_items in zip(ground_truth_items, sorted_actions_list):
-                ranked_k = [str(x) for x in ranked_items[:k]]
-
-                if gt_item in ranked_k:
-                    rank_pos = ranked_k.index(gt_item) + 1  # 1-indexed
-                    # NDCG: relevance is 1 for the correct item
-                    ndcg_scores.append(1.0 / np.log2(rank_pos + 1))
-                    hit_scores.append(1.0)
-                    rr_scores.append(1.0 / rank_pos)
-                    ap_scores.append(1.0 / rank_pos)
-                else:
-                    ndcg_scores.append(0.0)
-                    hit_scores.append(0.0)
-                    rr_scores.append(0.0)
-                    ap_scores.append(0.0)
-
-            results[f"ndcg@{k}"] = float(np.mean(ndcg_scores))
-            results[f"hit_rate@{k}"] = float(np.mean(hit_scores))
-            results[f"mrr@{k}"] = float(np.mean(rr_scores))
-            results[f"map@{k}"] = float(np.mean(ap_scores))
-
-        return results
-
     def after_fit(self):
         """Run the base hook, then score the test split.
 
@@ -2237,6 +2131,16 @@ def load_torch_model_training_from_task_id(model_cls: Type[TorchModelTraining], 
     return load_torch_model_training_from_task_dir(model_cls, task_dir)
 
 
+def _ranking_results(task: "SupervisedModelTraining") -> Dict[str, Any]:
+    """The ranking / ROC-AUC entries a finished ``_save_test_set_predictions`` left on ``task``."""
+    return {
+        "ranking_metrics": getattr(task, "_ranking_metrics", {}),
+        "ranking_baseline": getattr(task, "_ranking_baseline_metrics", {}),
+        "ranking_protocol": getattr(task, "_ranking_protocol", {}),
+        "roc_auc_metrics": getattr(task, "_roc_auc_metrics", {}),
+    }
+
+
 def run_evaluate(
     task_dir: str,
     metrics: Optional[List[str]] = None,
@@ -2266,9 +2170,10 @@ def run_evaluate(
         task_dir: Full path to the task result directory.
         metrics: Override the list of Lightning validation metrics
             (e.g. ``["loss", "binary_accuracy", "f1_score"]``).
-        ranking_metrics: Override whether to compute ranking metrics
-            (NDCG, HitRate, MRR, MAP).
-        sample_size_eval: Override the test-set sample size for evaluation.
+        ranking_metrics: Override whether to run the top-k ranking evaluation
+            (see :mod:`mars_rec.evaluation`).
+        sample_size_eval: Override the maximum number of ranking queries
+            (and ROC-AUC rows) evaluated.
         batch_size: Override the batch size.
         device: Override the device (``"cpu"``, ``"cuda"``, ``"mps"``).
         eval_split: Which splits to evaluate (Flow 1 only).
@@ -2325,10 +2230,8 @@ def run_evaluate(
     # a different task_id hash from the re-loaded params).
     task._source_task_dir = task_dir
 
-    # Opt-in candidate prefilter for ranking metric paths. Default False keeps
-    # post-train + re-eval byte-identical to the legacy behaviour; passing
-    # True consults ``project_config.candidate_provider_factory`` from inside
-    # ``_get_candidate_items``.
+    # Opt-in candidate prefilter: rank the project's
+    # ``candidate_provider_factory`` pool instead of the full catalog.
     task._enable_prefilter = bool(enable_prefilter)
 
     # Set output directory for eval artifacts: eval/<eval_name>/ unless overridden.
@@ -2360,7 +2263,6 @@ def run_evaluate(
         # Inject into task so all evaluation methods use external data
         task._test_data_frame = df_processed
         task._test_dataset = dataset
-        task._external_raw_df = df_raw
         # Override index_mapping to use the one from disk (avoid Luigi dependency)
         task._index_mapping = index_mapping
 
@@ -2378,8 +2280,7 @@ def run_evaluate(
         # Ranking + ROC-AUC + plots (reuses the injected test data)
         banner("External data — predictions & ranking", logger=logger)
         task._save_test_set_predictions()
-        results["ranking_metrics"] = getattr(task, "_ranking_metrics", {})
-        results["roc_auc_metrics"] = getattr(task, "_roc_auc_metrics", {})
+        results.update(_ranking_results(task))
 
     # --- Flow 1: original splits ---
     else:
@@ -2391,8 +2292,7 @@ def run_evaluate(
         if eval_split in ("test", "all"):
             banner("Re-evaluating on TEST set", logger=logger)
             task._save_test_set_predictions()
-            results["ranking_metrics"] = getattr(task, "_ranking_metrics", {})
-            results["roc_auc_metrics"] = getattr(task, "_roc_auc_metrics", {})
+            results.update(_ranking_results(task))
 
     # --- Save results ---
     task._save_eval_results(results)
@@ -2410,7 +2310,8 @@ def run_evaluate(
         if "val_metrics" in results:
             metadata["evaluation"] = results["val_metrics"]
         if results.get("ranking_metrics"):
-            metadata["ranking_metrics"] = results["ranking_metrics"]
+            for key in ("ranking_metrics", "ranking_baseline", "ranking_protocol"):
+                metadata[key] = results.get(key, {})
         if results.get("roc_auc_metrics"):
             metadata["roc_auc_metrics"] = results["roc_auc_metrics"]
 

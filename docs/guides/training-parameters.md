@@ -88,8 +88,8 @@ For the `forward()` output shape each loss expects, see [Models](../concepts/mod
 | Parameter | Default | Description |
 |---|---|---|
 | `metrics` | `["loss"]` | Metrics logged during training (see [`METRIC_REGISTRY`](extending.md#adding-a-metric)) |
-| `ranking_metrics` | `False` | Compute NDCG / HitRate / MRR / MAP @{5, 10, 20} and ROC-AUC on the test split |
-| `sample_size_eval` | `None` | Cap the number of test rows used for evaluation |
+| `ranking_metrics` | `False` | Run the [ranking evaluation](../concepts/evaluation.md) on the test split (accuracy + beyond-accuracy metrics @{5, 10, 20}, popularity baseline, ROC-AUC) |
+| `sample_size_eval` | `None` | Cap the number of ranking queries (and ROC-AUC rows) evaluated. Full-catalog scoring costs `queries × catalog` forward passes |
 
 ## Hardware and data loading
 

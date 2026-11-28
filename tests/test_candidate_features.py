@@ -326,68 +326,6 @@ class TestDatasetIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Training-time evaluation and parity with the sampler path
-# ---------------------------------------------------------------------------
-
-
-def _fake_training(cfg: ProjectConfig):
-    from mars_rec.simulation.training import SupervisedModelTraining
-
-    ns = types.SimpleNamespace(
-        project_config=cfg,
-        index_mapping=_index_mapping(),
-        obs_columns=[c.name for c in cfg.input_columns if c.name != "item_id"],
-        _fill_hist_columns=lambda df: df,
-    )
-    ns._resolved_candidate_feature_lookup = SupervisedModelTraining._resolved_candidate_feature_lookup.fget(ns)
-    ns._candidate_feature_fn = SupervisedModelTraining._candidate_feature_fn.fget(ns)
-    return SupervisedModelTraining, ns
-
-
-class TestEvaluationPath:
-    def _ob(self) -> dict:
-        b = _columns_batch()
-        return {k: (list(v[0]) if v.ndim > 1 else v[0].item()) for k, v in b.items() if k != "item_id"}
-
-    def test_create_ob_data_frame_applies_same_features(self):
-        cfg = _config({"candidate_feature_lookup": lambda idx: _lookup(), "candidate_feature_fn": category_in_history})
-        smt, ns = _fake_training(cfg)
-        candidates = [3, 4, 5, 6]
-        ob_df = smt._create_ob_data_frame(ns, self._ob(), candidates)
-
-        np.testing.assert_array_equal(ob_df["category"], CATEGORY[candidates])
-        np.testing.assert_allclose(ob_df["score"], SCORE[candidates])
-        # history [10, 10, pad]
-        np.testing.assert_array_equal(ob_df["category_in_history"], [2, 0, 2, 0])
-
-    def test_parity_with_dataset_path(self):
-        cfg = _config({"candidate_feature_lookup": _lookup(), "candidate_feature_fn": category_in_history})
-        smt, ns = _fake_training(cfg)
-        candidates = np.array([3, 4, 5, 6])
-        ob_df = smt._create_ob_data_frame(ns, self._ob(), list(candidates))
-
-        ds = InteractionsDataset(
-            _train_df(),
-            None,
-            cfg,
-            _index_mapping(),
-            candidate_feature_lookup=_lookup(),
-            candidate_feature_fn=category_in_history,
-        )
-        inp, _ = ds[[0, 0, 0, 0]]
-        out = ds._apply_candidate_features(inp, candidates)
-        names = [c.name for c in cfg.input_columns]
-        for name in ("category", "score", "category_in_history"):
-            np.testing.assert_allclose(ob_df[name].to_numpy(dtype=np.float64), out[names.index(name)])
-        assert [list(a) for a in ob_df["attrs"]] == [list(a) for a in out[names.index("attrs")]]
-
-    def test_noop_without_params(self):
-        smt, ns = _fake_training(_config())
-        ob_df = smt._create_ob_data_frame(ns, self._ob(), [3, 4])
-        np.testing.assert_array_equal(ob_df["category"], [10, 10])
-
-
-# ---------------------------------------------------------------------------
 # Inference
 # ---------------------------------------------------------------------------
 

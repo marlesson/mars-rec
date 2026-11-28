@@ -31,6 +31,10 @@ class MyLoss(nn.Module):
 2. Add it to `METRIC_REGISTRY` in the same file. The registry key is the name you pass in
    `metrics` (for example `"ndcg@10"`).
 
+These metrics are computed per batch during training. Offline top-k ranking metrics belong in
+[`mars_rec.evaluation.compute_ranking_metrics`][mars_rec.evaluation.compute_ranking_metrics] (see
+[Ranking evaluation](../concepts/evaluation.md)).
+
 ## Adding an optimizer or LR scheduler
 
 1. Implement or import it (custom optimizers live in `mars_rec/torch/optimizer.py`).

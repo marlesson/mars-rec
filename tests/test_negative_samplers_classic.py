@@ -102,6 +102,11 @@ def _assert_index_forms(ds, n):
 
 class TestByAvailableItems:
     @pytest.fixture
+    def config(self, config):
+        config.available_items_column_name = "available_items"
+        return config
+
+    @pytest.fixture
     def slate_df(self, df):
         out = df.copy()
         # Each row's slate: its own item plus "60"/"70" (idx 7, 8).
