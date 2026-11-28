@@ -132,11 +132,14 @@ nav:
   - Tutorials:
       - tutorials/index.md
       - Your first project: tutorials/custom-project.md
+      - Synthetic (offline quickstart): tutorials/synthetic.md
       - MovieLens 1M (NCF): tutorials/movielens.md
       - Last.fm (sequential): tutorials/lastfm.md
+      - Last.fm next-item (CE): tutorials/lastfm-next-item.md
       - Online Retail (session-based): tutorials/online-retail.md
       - Amazon Beauty (content-based): tutorials/amazon-beauty.md
       - MovieLens 100K (slate ranking): tutorials/movielens100k-slate.md
+      - MovieLens 100K (retrieval, InfoNCE): tutorials/movielens100k-retrieval.md
   - Guides:
       - guides/index.md
       - Training parameters: guides/training-parameters.md
