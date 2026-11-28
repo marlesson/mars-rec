@@ -13,7 +13,9 @@ Each test:
 2. resolves the ``project`` and ``recommender_module_class`` dotted paths;
 3. builds a synthetic index mapping + batch from ``project.input_columns``;
 4. runs forward + the configured loss + backward, checking the output
-   shape contract from AGENTS.md (``[batch]`` for BCE-family losses).
+   shape contract from AGENTS.md (``[batch]`` for BCE-family losses,
+   ``[batch, n_items]`` for ``ce``, ``[batch, dim]`` + ``get_target_emb``
+   for embedding losses such as ``infonce``).
 
 No data is downloaded or read.
 """
@@ -104,7 +106,7 @@ def _synthetic_inputs(config: ProjectConfig, extra_params: dict):
 
 @pytest.mark.parametrize("example", EXAMPLES)
 def test_example_trains_one_step(example):
-    from mars_rec.simulation.training import TORCH_LOSS_FUNCTIONS
+    from mars_rec.simulation.training import _EMBEDDING_LOSSES, TORCH_LOSS_FUNCTIONS
 
     kwargs = _captured_training_kwargs(example)
     assert kwargs["project"].startswith(f"examples.{example}."), kwargs["project"]
@@ -124,14 +126,21 @@ def test_example_trains_one_step(example):
     output = model(*inputs)
 
     loss_name = kwargs.get("loss_function", "mse")
+    loss_params = kwargs.get("loss_function_params", {})
     if loss_name in POINTWISE_LOSSES:
         assert output.shape == (BATCH,), f"{loss_name} expects [batch] output, got {tuple(output.shape)}"
         target = torch.randint(0, 2, (BATCH,)).float()
+    elif loss_name in _EMBEDDING_LOSSES:  # [batch, dim] query emb vs get_target_emb(targets)
+        assert output.dim() == 2 and output.shape[0] == BATCH
+        target_ids = torch.randint(3, VOCAB + 3, (BATCH,))
+        target = model.get_target_emb(target_ids)
+        assert target.shape == output.shape, f"get_target_emb {tuple(target.shape)} != forward {tuple(output.shape)}"
     else:  # ce → [batch, n_items]
         assert output.dim() == 2 and output.shape[0] == BATCH
+        assert output.shape[1] == model._n_items, "ce logits must cover the whole item vocabulary"
         target = torch.randint(0, output.shape[1], (BATCH,))
 
-    loss = TORCH_LOSS_FUNCTIONS[loss_name]()(output, target)
+    loss = TORCH_LOSS_FUNCTIONS[loss_name](**loss_params)(output, target)
     assert torch.isfinite(loss)
     loss.backward()
     grads = [p.grad for p in model.parameters() if p.requires_grad]
@@ -140,5 +149,14 @@ def test_example_trains_one_step(example):
 
 def test_all_examples_are_covered():
     """Guard against a new example silently skipping the smoke test."""
-    expected = {"movielens", "lastfm", "online_retail", "amazon_beauty", "movielens100k_slate"}
+    expected = {
+        "movielens",
+        "lastfm",
+        "lastfm_next_item",
+        "online_retail",
+        "amazon_beauty",
+        "movielens100k_slate",
+        "movielens100k_retrieval",
+        "synthetic",
+    }
     assert expected <= set(EXAMPLES)

@@ -77,12 +77,15 @@ src/mars_rec/          # Framework source code (the only installable package)
     download.py             # download_file — stdlib HTTP download (certifi CA bundle, atomic rename)
     plot.py                 # Training history plots
 
-examples/                   # Reference recsys projects (public datasets, auto-download)
+examples/                   # Reference recsys projects (public datasets auto-download; synthetic is offline)
+  synthetic/                # Generated offline — matrix factorisation; backs tests/test_examples_e2e.py
   movielens/                # MovieLens 1M — NCF (collaborative filtering + side features)
-  lastfm/                   # Last.fm HetRec 2K — sequential SASRec-lite
+  lastfm/                   # Last.fm HetRec 2K — sequential SASRec-lite (bce_logits, sampled negatives)
+  lastfm_next_item/         # Last.fm HetRec 2K — SASRec with full-softmax CE ([batch, n_items], predict)
   online_retail/            # UCI Online Retail — session-based GRU4Rec (session_id as user)
   amazon_beauty/            # Amazon Beauty 5-core — content-based two-tower (text emb)
   movielens100k_slate/      # MovieLens 100K — slate ranking (available_items + metadata)
+  movielens100k_retrieval/  # MovieLens 100K — two-tower retrieval with InfoNCE (get_target_emb)
 
 docs/                       # Documentation site (MkDocs Material) — published to GitHub Pages
   _ext/griffe_sphinx_roles.py  # Docs-only griffe extension: Sphinx roles → Markdown links
@@ -279,7 +282,13 @@ hand-computed test in `tests/test_evaluation.py`, and list them in `ranking_metr
 
 1. Inherit from `RecommenderModule`; accept `*features` in `forward()` (positional unpacking of `ProjectConfig.input_columns`).
 2. Declare the history as an `IOType.INDEXABLE_ARRAY` column with `same_index_as` the item column (see `examples/lastfm/`).
-3. Return logits over the item vocabulary: `[batch_size, n_items]` and train with `--loss-function ce`.
+3. Return logits over the item vocabulary: `[batch_size, n_items]` and train with `--loss-function ce`. Set `item_is_input=False`, make `output_column` the item column (`IOType.INDEXABLE`) and use `InteractionsDataset` (see `examples/lastfm_next_item/`).
+
+### Adding an embedding (retrieval) model
+
+1. `forward(*inputs)` returns the L2-normalised query embedding `[batch_size, dim]`; add `get_target_emb(item_ids)` returning L2-normalised item embeddings.
+2. Train with an embedding loss (`infonce`, `cosine_similarity`, `hardneg_infonce`), which selects `EmbeddingRecommenderLightningModule`.
+3. Same `ProjectConfig` contract as CE: `item_is_input=False`, `output_column` = item column, `InteractionsDataset` (see `examples/movielens100k_retrieval/`).
 
 ### Modifying the inference / evaluate pipeline
 
@@ -389,8 +398,9 @@ python -c "from mars_rec.inference import run_inference, run_evaluate; print('OK
 make test
 make test-ci
 
-# 3. End-to-end test with MovieLens 100K slate sample (small + fast)
-PYTHONPATH=src:. python examples/movielens100k_slate/run_training.py
+# 3. End-to-end test with the offline synthetic example (no download, seconds;
+#    also run by tests/test_examples_e2e.py)
+PYTHONPATH=src:. python examples/synthetic/run_training.py
 
 # 4. CLI test
 mars-rec run supervised \

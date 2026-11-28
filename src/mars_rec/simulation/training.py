@@ -2046,6 +2046,11 @@ class SupervisedModelTraining(TorchModelTraining):
         """
         from sklearn.metrics import roc_auc_score
 
+        if self.loss_function in _EMBEDDING_LOSSES:
+            # forward() returns query embeddings [N, D], not class scores.
+            logger.info("ROC-AUC skipped: not defined for embedding losses (%s)", self.loss_function)
+            return {}
+
         # Same forward pass as the test-set plots when no subsample is drawn.
         all_logits, all_targets = self._forward_dataset(self._get_roc_auc_dataset())  # [N, C] or [N], [N]
         y_true = all_targets.numpy().astype(int)

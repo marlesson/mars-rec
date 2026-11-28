@@ -45,6 +45,15 @@ mars-rec predict \
 }
 ```
 
+!!! warning "`predict` needs `[batch, n_items]` logits"
+    The top-k is taken over the model's output columns, so `predict` is meant for models that score
+    the whole catalogue in one forward pass (trained with `ce`, see
+    [Last.fm next-item](../tutorials/lastfm-next-item.md)). Point-wise models (`[batch]`, BCE family)
+    and embedding models (`[batch, dim]`, `infonce`) do not output one logit per item, so their
+    `predict` output is not a recommendation list. Rank their candidates with `mars-rec evaluate --ranking-metrics`, or with
+    [`score_candidates_bce`][mars_rec.inference.score_candidates_bce] /
+    [`score_candidates_emb`][mars_rec.inference.score_candidates_emb].
+
 `--data` accepts `.parquet` or `.csv`. Keep in mind:
 
 - the key is always `top10s`, whatever the value of `--top-k`;

@@ -44,17 +44,19 @@ pip install -e .            # or: make install-locked (pinned stack, as CI)
 ## Quickstart
 
 ```bash
-# Train the smallest bundled example (downloads MovieLens 100K on first run)
+# Train the offline synthetic example (no download, a few seconds on CPU)
 mars-rec run supervised \
-  --project examples.movielens100k_slate.config.movielens100k_slate \
-  --recommender-module-class examples.movielens100k_slate.model.ML100KSlateRanker \
-  --recommender-extra-params '{"n_factors": 32, "genre_dim": 19, "hidden_size": 64}' \
-  --loss-function bce_logits --epochs 8 --device cpu
+  --project examples.synthetic.config.synthetic \
+  --recommender-module-class examples.synthetic.model.SyntheticMF \
+  --recommender-extra-params '{"n_factors": 16}' \
+  --loss-function bce_logits --learning-rate 0.01 --epochs 5 --ranking-metrics --device cpu
 
-# Compare runs, predict, re-evaluate
-mars-rec results --project movielens100k_slate --sort-by val_loss
-mars-rec predict  --task-id <TASK_ID> --data data/test.parquet --top-k 10
+# Compare runs, re-evaluate
+mars-rec results --project synthetic --sort-by val_loss
 mars-rec evaluate --task-id <TASK_ID> --ranking-metrics --split test
+
+# Top-k per row (models with [batch, n_items] logits, e.g. examples/lastfm_next_item)
+mars-rec predict  --task-id <TASK_ID> --data data/test.parquet --top-k 10
 ```
 
 A project has three parts: a data-prep task, a `ProjectConfig` and a model.
@@ -85,11 +87,14 @@ For a step-by-step walkthrough, see
 
 | Example | Dataset | Feature it exercises |
 |---|---|---|
+| `synthetic` | Generated offline | Matrix factorisation, full lifecycle in seconds (no download) |
 | `movielens` | MovieLens 1M | NCF with user/genre side features |
 | `lastfm` | HetRec Last.fm 2K | Sequential SASRec-lite (`INDEXABLE_ARRAY` + `same_index_as`) |
+| `lastfm_next_item` | HetRec Last.fm 2K | Next-item SASRec with full-softmax `ce` (`[batch, n_items]`) |
 | `online_retail` | UCI Online Retail | Session-based GRU4Rec (`session_id` as user) |
 | `amazon_beauty` | Amazon Beauty 5-core | Content-based two-tower (`metadata_columns` text embedding) |
 | `movielens100k_slate` | MovieLens 100K | Slate ranking (`available_items` negatives) |
+| `movielens100k_retrieval` | MovieLens 100K | Two-tower retrieval with `infonce` (in-batch negatives) |
 
 ```bash
 PYTHONPATH=src:. python examples/<name>/run_training.py
